@@ -49,6 +49,60 @@ void DecoderAttentionTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx
   }
 }
 
+void CrossAttentionTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) {
+  // Type inference
+  ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 2, 0);
+  if (ctx.getNumOutputs() > 1) {
+    ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 2, 1);
+  }
+
+  // Shape inference
+  if (hasInputShape(ctx, 0) && hasInputShape(ctx, 2)) {
+    auto& q_input_shape = getInputShape(ctx, 0);
+    auto& q_input_dims = q_input_shape.dim();
+    if (q_input_dims.size() != 3) {
+      fail_shape_inference("Inputs 0 shall be 3 dimensions");
+    }
+    auto& kv_input_shape = getInputShape(ctx, 1);
+    auto& kv_input_dims = kv_input_shape.dim();
+    if (kv_input_dims.size() != 3) {
+      fail_shape_inference("Inputs 0 shall be 3 dimensions");
+    }
+
+    auto& q_bias_shape = getInputShape(ctx, 4);
+    auto& q_bias_dims = q_bias_shape.dim();
+    if (q_bias_dims.size() != 1) {
+      fail_shape_inference("Invalid bias shape");
+    }
+    auto& kv_bias_shape = getInputShape(ctx, 5);
+    auto& kv_bias_dims = kv_bias_shape.dim();
+    if (kv_bias_dims.size() != 1) {
+      fail_shape_inference("Invalid bias shape");
+    }
+
+    std::vector<int64_t> qkv_hidden_sizes;
+    getRepeatedAttribute(ctx, "qkv_hidden_sizes", qkv_hidden_sizes);
+
+    int64_t output_hidden_size;
+    if (qkv_hidden_sizes.size() != 0) {
+      if (qkv_hidden_sizes.size() != 3) {
+        fail_shape_inference("qkv_hidden_sizes should have 3 elements")
+      }
+      output_hidden_size = qkv_hidden_sizes[2];
+    } else {
+      output_hidden_size = q_bias_shape.dim(0).dim_value();
+    }
+
+    ONNX_NAMESPACE::TensorShapeProto output_shape;
+    for (auto& dim : q_input_dims) {
+      *output_shape.add_dim() = dim;
+    }
+
+    output_shape.mutable_dim(2)->set_dim_value(output_hidden_size);
+    updateOutputShape(ctx, 0, output_shape);
+  }
+}
+
 constexpr const char* Attention_ver1_doc = R"DOC(
 Multi-Head Self Attention that can be either unidirectional (like GPT-2) or bidirectional (like BERT).
 The mask_index input is optional. Besides raw attention mask with shape (batch_size, past_sequence_length + sequence_length)
@@ -148,6 +202,38 @@ ONNX_MS_OPERATOR_SET_SCHEMA(DecoderAttention, 1,
                                 .TypeConstraint("B", {"tensor(bool)"}, "Constrain key_padding_mask to bool tensors.")
                                 .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
                                   DecoderAttentionTypeAndShapeInference(ctx);
+                                }));
+
+constexpr const char* Cross_Attention_doc = R"DOC(
+This CrossAttention supports self attention and cross attention, key and value cache, and key_padding_mask. The attention mask is not support at the moment.
+Some boolean parameters are passed by runtime input for generic purpose
+)DOC";
+
+ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(CrossAttention, 1,
+                            OpSchema()
+                                .SetDomain(kENDomain)
+                                .SetDoc(Cross_Attention_doc)
+                                .SinceVersion(1)
+                                .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                .Attr("qkv_hidden_sizes",
+                                      "Hidden layer sizes of Q, K, V paths in Attention",
+                                      AttributeProto::INTS,
+                                      OPTIONAL_VALUE)
+                                .Input(0, "query", "3D input tensor with shape (batch_size, sequence_length, hidden_size), hidden_size = num_heads * head_size", "T")
+                                .Input(1, "key", "3D input tensor with shape (batch_size, total_sequence_length, hidden_size)", "T")
+                                .Input(2, "q_weight", "2D input tensor with shape (hidden_size, hidden_size)", "T")
+                                .Input(3, "kv_weight", "2D input tensor with shape (hidden_size, 2 * hidden_size)", "T")
+                                .Input(4, "q_bias", "1D input tensor with shape (hidden_size)", "T")
+                                .Input(5, "kv_bias", "1D input tensor with shape (2 * hidden_size)", "T")
+                                .Input(6, "mask_index",
+                                       "Attention mask with shape (batch_size, 1, max_sequence_length, max_sequence_length), (batch_size, past_sequence_length + sequence_length)"
+                                       "or (batch_size, sequence_length, past_sequence_length + sequence_length), or index with shape (batch_size) or (2 * batch_size).",
+                                       "M", OpSchema::Optional)
+                                .Output(0, "output", "3D output tensor with shape (sequence_length, batch_size, hidden_size)", "T")
+                                .TypeConstraint("T", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float and float16 tensors.")
+                                .TypeConstraint("M", {"tensor(int32)"}, "Constrain mask index to integer types")
+                                .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                  CrossAttentionTypeAndShapeInference(ctx);
                                 }));
 
 constexpr const char* EmbedLayerNormalization_ver1_doc = R"DOC(

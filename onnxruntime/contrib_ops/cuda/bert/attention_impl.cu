@@ -207,6 +207,113 @@ bool LaunchAttentionKernel(
 
 
 template <typename T>
+bool CrossQkvToContext(
+    const cudaDeviceProp& prop, cublasHandle_t& cublas, cudaStream_t stream,
+    const int batch_size, const int sequence_length, const int kv_sequence_length, const int num_heads, const int head_size, const size_t element_size,
+    const T* query, const T* key, T* output, T* qkv_buffer, T* workspace_buffer,
+    const int* mask_index, gsl::span<const int64_t> mask_index_dims, bool use_persistent_softmax) {
+
+  const int max_threads_per_block = prop.maxThreadsPerBlock;
+  const int BN = batch_size * num_heads;
+  const int BHN = BN * head_size;
+  const int BNS = BN * sequence_length;
+  const int k_buffer_offset = sequence_length * BHN;
+  const int v_buffer_offset = (sequence_length + kv_sequence_length) * BHN;
+
+  T* temp_qkv_buffer = workspace_buffer;
+
+  const T* q = qkv_buffer;
+  //transpose q and copy them to qkv_buffer
+  if (!LaunchTransQkv(stream, 1, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, query, qkv_buffer)) {
+    return false;
+  }
+
+  const T* k = qkv_buffer + k_buffer_offset;
+  const T* v = qkv_buffer + v_buffer_offset;
+  //transpose kv and copy them to qkv_buffer
+  if (!LaunchTransQkv(stream, 2, kv_sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, key, qkv_buffer + k_buffer_offset)) {
+    return false;
+  }
+
+  // scratch1: BxNxSxS* buffer
+  // scratch2: BxNxSxS* buffer
+  // scratch3: BxNxSxH  buffer
+  T* scratch1 = temp_qkv_buffer + 3 * BHN * sequence_length;
+  T* scratch2 = scratch1 + BNS * kv_sequence_length;
+  T* scratch3 = scratch2 + BNS * kv_sequence_length;
+
+  // compute Q*K' (as K'*Q), scaled by 1/sqrt(H) and store in scratch1: BxNxSxS*
+  // Q: BxNxSxH, K (present_k): BxNxS*xH, Q*K': BxNxSxS*
+  const float rsqrt_head_size = 1.f / sqrt(static_cast<float>(head_size));
+  const int temp_matrix_size = sequence_length * kv_sequence_length;
+  float one = 1.0f;
+  float zero = 0.f;
+
+  float alpha = rsqrt_head_size;
+  const int strideA = kv_sequence_length * head_size;
+  const int strideB = sequence_length * head_size;
+  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+    cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, k, head_size, strideA,
+    q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
+    return false;
+  }
+
+  // apply softmax and store result P to scratch2: BxNxSxS*
+  if (!ComputeSoftmax<T>(stream, kv_sequence_length, sequence_length, batch_size, num_heads, nullptr, scratch1, scratch2, false)) {
+      return false;
+  }
+
+  // compute P*V (as V*P), and store in scratch3: BxNxSxH
+  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+      cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, v, head_size, strideA,
+      scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
+      return false;
+    }
+
+  // scratch3 is BxNxSxH, transpose to output BxSxNxH
+  return LaunchTransCtx(stream, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, scratch3, output);
+}
+
+
+bool LaunchCrossAttentionKernel(
+    const cudaDeviceProp& prop,
+    cudaStream_t stream,
+    const void* query,
+    const void* key,
+    const int* mask_index,
+    gsl::span<const int64_t> mask_index_dims,
+    void* output,
+    const int batch_size,
+    const int sequence_length,
+    const int kv_sequence_length,
+    const int num_heads,
+    const int head_size,
+    void* qkv_buffer,
+    void* workspace_buffer,
+    cublasHandle_t& cublas,
+    const size_t element_size) {
+
+  // For testing, environment variable ORT_TRANSFORMER_OPTIONS=1 could enable persistent softmax
+  const TransformerOptions* options = TransformerOptions::GetInstance();
+  bool use_persistent_softmax = options->IsPrecisionMode() && !options->DisablePersistentSoftmax();
+
+  if (element_size == 2) {
+    return CrossQkvToContext(prop, cublas, stream,
+                        batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
+                        reinterpret_cast<const half*>(query), reinterpret_cast<const half*>(key), reinterpret_cast<half*>(output),
+                        reinterpret_cast<half*>(qkv_buffer), reinterpret_cast<half*>(workspace_buffer),
+                        mask_index, mask_index_dims, use_persistent_softmax);
+  } else {
+    return CrossQkvToContext(prop, cublas, stream,
+                        batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
+                        reinterpret_cast<const float*>(query), reinterpret_cast<const float*>(key), reinterpret_cast<float*>(output),
+                        reinterpret_cast<float*>(qkv_buffer), reinterpret_cast<float*>(workspace_buffer),
+                        mask_index, mask_index_dims, use_persistent_softmax);
+  }
+}
+
+
+template <typename T>
 bool DecoderQkvToContext(
   const cudaDeviceProp& prop,
   cudaStream_t stream,

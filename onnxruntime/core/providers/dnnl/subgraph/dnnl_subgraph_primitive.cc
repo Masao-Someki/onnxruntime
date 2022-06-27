@@ -159,6 +159,8 @@ void DnnlSubgraphPrimitive::AddKernels() {
       DnnlPow().CreatePrimitive(*this, node);
     } else if (node.OpType() == "QAttention") {
       DnnlQAttention().CreatePrimitive(*this, node);
+    } else if (node.OpType() == "QCrossAttention") {
+      DnnlQCrossAttention().CreatePrimitive(*this, node);
     } else if (reduce_ops.count(node.OpType())) {
       DnnlReduce().CreatePrimitive(*this, node);
     } else if (node.OpType() == "Reshape") {

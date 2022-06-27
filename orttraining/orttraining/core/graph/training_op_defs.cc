@@ -3451,6 +3451,7 @@ void RegisterOrtOpSchemas() {
   }
   domainToVersionRangeInstance.AddDomainToVersion(onnxruntime::kMSExperimentalDomain, 1, 1);
   domainToVersionRangeInstance.AddDomainToVersion(onnxruntime::kMSNchwcDomain, 1, 1);
+  domainToVersionRangeInstance.AddDomainToVersion(onnxruntime::kENDomain, 1, 1);
 
   onnxruntime::contrib::RegisterContribSchemas();
   onnxruntime::training::RegisterTrainingOpSchemas();
