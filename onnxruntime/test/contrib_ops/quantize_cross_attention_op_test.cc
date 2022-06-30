@@ -38,8 +38,10 @@ void RunQCrossAttention(const std::vector<float>& query,
                    const std::vector<float>& kv_bias_data,
                    const std::vector<int32_t>& mask_index_data,
                    const std::vector<float>& output_data,
-                   quantization::Params<QInput>& input_quant_params,
-                   quantization::Params<QWeight>& weight_quant_params,
+                   quantization::Params<QInput>& query_quant_params,
+                   quantization::Params<QInput>& key_quant_params,
+                   quantization::Params<QWeight>& q_weight_quant_params,
+                   quantization::Params<QWeight>& k_weight_quant_params,
                    int batch_size,
                    int sequence_length,
                    int kv_sequence_length,
@@ -67,19 +69,19 @@ void RunQCrossAttention(const std::vector<float>& query,
   }
   std::vector<int64_t> output_dims = {batch_size, sequence_length, hidden_size};
 
-  if (input_quant_params.scale != 0.0f) {
+  if (query_quant_params.scale != 0.0f) {
     tester.AddInput<QInput>("query",
                             q_input_dims,
-                            QuantizeTestVector<QInput>(query, input_quant_params));
+                            QuantizeTestVector<QInput>(query, query_quant_params));
     tester.AddInput<QInput>("key",
                             kv_input_dims,
-                            QuantizeTestVector<QInput>(key, input_quant_params));
+                            QuantizeTestVector<QInput>(key, key_quant_params));
     tester.AddInput<QWeight>("q_weight",
                              q_weights_dims,
-                             QuantizeTestVector<QWeight>(q_weights_data, weight_quant_params));
+                             QuantizeTestVector<QWeight>(q_weights_data, q_weight_quant_params));
     tester.AddInput<QWeight>("kv_weight",
                              kv_weights_dims,
-                             QuantizeTestVector<QWeight>(kv_weights_data, weight_quant_params));
+                             QuantizeTestVector<QWeight>(kv_weights_data, k_weight_quant_params));
   } else {
     bool force_symmetric = false;
     if constexpr (ep == EP::CUDA) {
@@ -88,31 +90,36 @@ void RunQCrossAttention(const std::vector<float>& query,
     tester.AddInput<QInput>(
         "query",
         q_input_dims,
-        QuantizeLinearTestVector<QInput>(query, input_quant_params, force_symmetric));
+        QuantizeLinearTestVector<QInput>(query, query_quant_params, force_symmetric));
     tester.AddInput<QInput>(
         "key",
         kv_input_dims,
-        QuantizeLinearTestVector<QInput>(key, input_quant_params, force_symmetric));
+        QuantizeLinearTestVector<QInput>(key, key_quant_params, force_symmetric));
     tester.AddInput<QWeight>(
         "q_weight",
         q_weights_dims,
-        QuantizeLinearTestVector<QWeight>(q_weights_data, weight_quant_params, force_symmetric));
+        QuantizeLinearTestVector<QWeight>(q_weights_data, q_weight_quant_params, force_symmetric));
     tester.AddInput<QWeight>(
         "kv_weight",
         kv_weights_dims,
-        QuantizeLinearTestVector<QWeight>(kv_weights_data, weight_quant_params, force_symmetric));
+        QuantizeLinearTestVector<QWeight>(kv_weights_data, k_weight_quant_params, force_symmetric));
   }
+
   if (use_float16) {
     tester.AddInput<MLFloat16>("q_bias", q_bias_dims, ToFloat16(q_bias_data));
     tester.AddInput<MLFloat16>("kv_bias", kv_bias_dims, ToFloat16(kv_bias_data));
-    tester.AddInput<MLFloat16>("input_scale", {1}, ToFloat16({input_quant_params.scale}));
-    tester.AddInput<MLFloat16>("weight_scale", {1}, ToFloat16({weight_quant_params.scale}));
+    tester.AddInput<MLFloat16>("query_scale", {1}, ToFloat16({query_quant_params.scale}));
+    tester.AddInput<MLFloat16>("key_scale", {1}, ToFloat16({key_quant_params.scale}));
+    tester.AddInput<MLFloat16>("q_weight_scale", {1}, ToFloat16({q_weight_quant_params.scale}));
+    tester.AddInput<MLFloat16>("k_weight_scale", {1}, ToFloat16({k_weight_quant_params.scale}));
     tester.AddOutput<MLFloat16>("output", output_dims, ToFloat16(output_data));
   } else {
     tester.AddInput<float>("q_bias", q_bias_dims, q_bias_data);
     tester.AddInput<float>("kv_bias", kv_bias_dims, kv_bias_data);
-    tester.AddInput<float>("input_scale", {1}, {input_quant_params.scale});
-    tester.AddInput<float>("weight_scale", {1}, {weight_quant_params.scale});
+    tester.AddInput<float>("query_scale", {1}, {query_quant_params.scale});
+    tester.AddInput<float>("key_scale", {1}, {key_quant_params.scale});
+    tester.AddInput<float>("q_weight_scale", {1}, {q_weight_quant_params.scale});
+    tester.AddInput<float>("k_weight_scale", {1}, {k_weight_quant_params.scale});
     tester.AddOutput<float>("output", output_dims, output_data);
   }
 
@@ -123,8 +130,10 @@ void RunQCrossAttention(const std::vector<float>& query,
     tester.AddOptionalInputEdge<int32_t>();
   }
 
-  tester.AddInput<QInput>("input_zero_point", {1}, {input_quant_params.zero_point});
-  tester.AddInput<QWeight>("weight_zero_point", {1}, {weight_quant_params.zero_point});
+  tester.AddInput<QInput>("query_zero_point", {1}, {query_quant_params.zero_point});
+  tester.AddInput<QInput>("key_zero_point", {1}, {key_quant_params.zero_point});
+  tester.AddInput<QWeight>("q_weight_zero_point", {1}, {q_weight_quant_params.zero_point});
+  tester.AddInput<QWeight>("k_weight_zero_point", {1}, {k_weight_quant_params.zero_point});
 
   if constexpr (ep == EP::CUDA) {
     std::vector<std::unique_ptr<IExecutionProvider>> execution_providers;
@@ -190,17 +199,24 @@ static void RunQCrossAttentionDNNL(
     bool use_special_quantize_parameter = true) {
   // Return without running code if USE_DNNL is not defined
 #ifdef USE_DNNL
-  quantization::Params<uint8_t> input_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
-  quantization::Params<int8_t> weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<uint8_t> query_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<uint8_t> key_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<int8_t> q_weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<int8_t> k_weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
   if (use_special_quantize_parameter) {
-    input_quant_params.scale = 0.1f;
-    weights_quant_params.scale = 0.1f;
-    input_quant_params.zero_point = 128;
-    weights_quant_params.zero_point = 1;
+    query_quant_params.scale = 0.1f;
+    key_quant_params.scale = 0.1f;
+    q_weights_quant_params.scale = 0.1f;
+    k_weights_quant_params.scale = 0.1f;
+    query_quant_params.zero_point = 128;
+    key_quant_params.zero_point = 128;
+    q_weights_quant_params.zero_point = 1;
+    k_weights_quant_params.zero_point = 1;
   }
 
   RunQCrossAttention<uint8_t, int8_t, EP::DNNL>(
-      query, key, q_weights_data, kv_weights_data, q_bias_data, k_bias_data, mask_index_data, output_data, input_quant_params, weights_quant_params,
+      query, key, q_weights_data, kv_weights_data, q_bias_data, k_bias_data, mask_index_data, output_data,
+      query_quant_params, key_quant_params, q_weights_quant_params, k_weights_quant_params,
       batch_size, sequence_length, kv_sequence_length, hidden_size, number_of_heads);
 #else
   ORT_UNUSED_PARAMETER(query);
@@ -213,6 +229,7 @@ static void RunQCrossAttentionDNNL(
   ORT_UNUSED_PARAMETER(output_data);
   ORT_UNUSED_PARAMETER(batch_size);
   ORT_UNUSED_PARAMETER(sequence_length);
+  ORT_UNUSED_PARAMETER(kv_sequence_length);
   ORT_UNUSED_PARAMETER(hidden_size);
   ORT_UNUSED_PARAMETER(number_of_heads);
   ORT_UNUSED_PARAMETER(use_special_quantize_parameter);
@@ -234,17 +251,25 @@ static void RunQCrossAttentionU8U8(
     int hidden_size,
     int number_of_heads,
     bool use_special_quantize_parameter = true) {
-  quantization::Params<uint8_t> input_quant_params = {0.0f, 0};
-  quantization::Params<uint8_t> weights_quant_params = {0.0f, 0};
+  quantization::Params<uint8_t> query_quant_params = {0.0f, 0};
+  quantization::Params<uint8_t> key_quant_params = {0.0f, 0};
+  quantization::Params<uint8_t> q_weights_quant_params = {0.0f, 0};
+  quantization::Params<uint8_t> k_weights_quant_params = {0.0f, 0};
+
   if (use_special_quantize_parameter) {
-    input_quant_params.scale = 0.1f;
-    weights_quant_params.scale = 0.1f;
-    input_quant_params.zero_point = 128;
-    weights_quant_params.zero_point = 128;
+    query_quant_params.scale = 0.1f;
+    key_quant_params.scale = 0.1f;
+    q_weights_quant_params.scale = 0.1f;
+    k_weights_quant_params.scale = 0.1f;
+    query_quant_params.zero_point = 128;
+    key_quant_params.zero_point = 128;
+    q_weights_quant_params.zero_point = 128;
+    k_weights_quant_params.zero_point = 128;
   }
 
   RunQCrossAttention<uint8_t, uint8_t, EP::CPU>(
-      query, key, q_weights_data, kv_weights_data, q_bias_data, kv_bias_data, mask_index_data, output_data, input_quant_params, weights_quant_params,
+      query, key, q_weights_data, kv_weights_data, q_bias_data, kv_bias_data, mask_index_data, output_data,
+      query_quant_params, key_quant_params, q_weights_quant_params, k_weights_quant_params,
       batch_size, sequence_length, kv_sequence_length, hidden_size, number_of_heads);
 }
 
@@ -263,17 +288,24 @@ static void RunQCrossAttentionU8S8(
     int hidden_size,
     int number_of_heads,
     bool use_special_quantize_parameter = true) {
-  quantization::Params<uint8_t> input_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
-  quantization::Params<int8_t> weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<uint8_t> query_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<uint8_t> key_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<int8_t> q_weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
+  quantization::Params<int8_t> k_weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
   if (use_special_quantize_parameter) {
-    input_quant_params.scale = 0.1f;
-    weights_quant_params.scale = 0.1f;
-    input_quant_params.zero_point = 128;
-    weights_quant_params.zero_point = 1;
+    query_quant_params.scale = 0.1f;
+    key_quant_params.scale = 0.1f;
+    q_weights_quant_params.scale = 0.1f;
+    k_weights_quant_params.scale = 0.1f;
+    query_quant_params.zero_point = 128;
+    key_quant_params.zero_point = 128;
+    q_weights_quant_params.zero_point = 1;
+    k_weights_quant_params.zero_point = 1;
   }
 
   RunQCrossAttention<uint8_t, int8_t, EP::CPU>(
-      query, key, q_weights_data, kv_weights_data, q_bias_data, kv_bias_data, mask_index_data, output_data, input_quant_params, weights_quant_params,
+      query, key, q_weights_data, kv_weights_data, q_bias_data, kv_bias_data, mask_index_data, output_data,
+      query_quant_params, key_quant_params, q_weights_quant_params, k_weights_quant_params,
       batch_size, sequence_length, kv_sequence_length, hidden_size, number_of_heads);
 }
 

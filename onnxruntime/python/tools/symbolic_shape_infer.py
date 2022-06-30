@@ -181,6 +181,7 @@ class SymbolicShapeInference:
             'Neg': self._infer_symbolic_compute_ops,
             # contrib ops:
             'Attention': self._infer_Attention,
+            'CrossAttention': self._infer_CrossAttention,
             'BiasGelu': self._infer_BiasGelu,
             'EmbedLayerNormalization': self._infer_EmbedLayerNormalization,
             'FastGelu': self._infer_FastGelu,
@@ -390,8 +391,8 @@ class SymbolicShapeInference:
             'If', 'Loop', 'Scan', 'SplitToSequence', 'ZipMap', \
             # contrib ops
 
-
-            'Attention', 'BiasGelu', \
+            'Attention', 'CrossAttention', \
+            'BiasGelu', \
             'EmbedLayerNormalization', \
             'FastGelu', 'Gelu', 'LayerNormalization', \
             'LongformerAttention', \
@@ -1737,6 +1738,15 @@ class SymbolicShapeInference:
                     past_shape[3] = f"{past_shape[3]}+{input_shape[1]}"
                 vi = self.known_vi_[node.output[1]]
                 vi.CopyFrom(helper.make_tensor_value_info(vi.name, output_dtype, past_shape))
+
+    def _infer_CrossAttention(self, node):
+        q_shape = self._get_shape(node, 0)
+        q_shape_bias = self._get_shape(node, 4)
+        assert len(q_shape) == 3 and len(q_shape_bias) == 1
+        shape[2] = int(shape_bias[0])
+        output_dtype = self.known_vi_[node.input[0]].type.tensor_type.elem_type
+        vi = self.known_vi_[node.output[0]]
+        vi.CopyFrom(helper.make_tensor_value_info(node.output[0], output_dtype, shape))
 
     def _infer_BiasGelu(self, node):
         self._propagate_shape_and_type(node)

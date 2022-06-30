@@ -1068,26 +1068,46 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                                       "1D input tensor with shape (3 * hidden_size)",
                                       "T3")
                                   .Input(
-                                      6, "input_scale",
+                                      6, "query_scale",
                                       "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
                                       "T3")
                                   .Input(
-                                      7, "weight_scale",
+                                      7, "key_scale",
+                                      "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                      "T3")
+                                  .Input(
+                                      8, "q_weight_scale",
                                       "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
                                       "Its size should be 3 * hidden_size if it is per-column quantization",
                                       "T3")
                                   .Input(
-                                      8, "mask_index",
+                                      9, "kv_weight_scale",
+                                      "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                      "Its size should be 3 * hidden_size if it is per-column quantization",
+                                      "T3")
+                                  .Input(
+                                      10, "mask_index",
                                       "Attention mask index with shape (batch_size)",
                                       "T4",
                                       OpSchema::Optional)
                                   .Input(
-                                      9, "input_zero_point",
+                                      11, "query_zero_point",
                                       "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
                                       "T1",
                                       OpSchema::Optional)
                                   .Input(
-                                      10, "weight_zero_point",
+                                      12, "key_zero_point",
+                                      "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                      "T1",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      13, "q_weight_zero_point",
+                                      "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                      "Its size should be 3 * hidden_size if it is per-column quantization",
+                                      "T2",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      14, "k_weight_zero_point",
                                       "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
                                       "Its size should be 3 * hidden_size if it is per-column quantization",
                                       "T2",
@@ -1109,7 +1129,7 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                                     }
 
                                     // Shape inference
-                                    if (hasInputShape(ctx, 0) && hasInputShape(ctx, 2)) {
+                                    if (hasInputShape(ctx, 0) && hasInputShape(ctx, 1) && hasInputShape(ctx, 4) && hasInputShape(ctx, 5)) {
                                       auto& q_input_shape = getInputShape(ctx, 0);
                                       auto& q_input_dims = q_input_shape.dim();
                                       if (q_input_dims.size() != 3) {
@@ -1118,7 +1138,7 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                                       auto& kv_input_shape = getInputShape(ctx, 1);
                                       auto& kv_input_dims = kv_input_shape.dim();
                                       if (kv_input_dims.size() != 3) {
-                                        fail_shape_inference("Inputs 0 shall be 3 dimensions");
+                                        fail_shape_inference("Inputs 1 shall be 3 dimensions");
                                       }
 
                                       auto& q_bias_shape = getInputShape(ctx, 4);

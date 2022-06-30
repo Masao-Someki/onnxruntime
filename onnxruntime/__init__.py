@@ -2,13 +2,15 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
+# Modifications by Masao Someki
+# Copyright (c) 2022 Masao Someki
 """
 ONNX Runtime is a performance-focused scoring engine for Open Neural Network Exchange (ONNX) models.
 For more information on ONNX Runtime, please see `aka.ms/onnxruntime <https://aka.ms/onnxruntime/>`_
 or the `Github project <https://github.com/microsoft/onnxruntime/>`_.
 """
-__version__ = "1.11.1"
-__author__ = "Microsoft"
+__version__ = "1.11.1-espnet_onnx"
+__author__ = "Microsoft, Masao Someki"
 
 # we need to do device version validation (for example to check Cuda version for an onnxruntime-training package).
 # in order to know whether the onnxruntime package is for training it needs

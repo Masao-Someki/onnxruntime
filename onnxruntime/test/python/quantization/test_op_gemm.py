@@ -121,6 +121,67 @@ class TestOpGEMM(unittest.TestCase):
 
         onnx.save(model, output_model_path)
 
+    def construct_model_cross_attention(self, output_model_path):
+        #      (query)  (key)
+        #         |       |
+        #         ----+----
+        #             |
+        #       CrossAttention
+        #             |
+        #           MatMul
+        #             |
+        #          (output)
+        query_name = 'query'
+        key_name = 'key'
+        output_name = 'output'
+        initializers = []
+
+        def make_cross_attention_node(q_name, k_name, q_weight_shape, k_weight_shape, q_weight_name, k_weight_name,
+                q_bias_shape, k_bias_shape, q_bias_name, k_bias_name, output_name):
+            q_weight_data = np.random.normal(0, 0.1, q_weight_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(q_weight_data, name=q_weight_name))
+            k_weight_data = np.random.normal(0, 0.1, k_weight_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(k_weight_data, name=k_weight_name))
+
+            q_bias_data = np.random.normal(0, 0.1, q_bias_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(q_bias_data, name=q_bias_name))
+            k_bias_data = np.random.normal(0, 0.1, k_bias_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(k_bias_data, name=k_bias_name))
+
+            return onnx.helper.make_node('CrossAttention',
+                [q_name, k_name, q_weight_name, k_weight_name, q_bias_name, k_bias_name], [output_name])
+
+        def make_matmul_node(input_name, weight_shape, weight_name, output_name):
+            weight_data = np.random.normal(0, 0.1, weight_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(weight_data, name=weight_name))
+
+            return onnx.helper.make_node('MatMul', [input_name, weight_name], [output_name])
+        
+        # make cross attention node
+        attention_output_name = "attention_output"
+        cross_attention_node = make_cross_attention_node(
+            query_name, key_name, [10, 10], [10, 20], 'q.weight', 'kv.weight',
+            [10], [20], 'q.bias', 'kv.bias', attention_output_name)
+        cross_attention_node.domain = "espnet_onnx"
+        cross_attention_node.attribute.extend([helper.make_attribute("num_heads", 5)])
+
+        # make matmul node
+        matmul_node = make_matmul_node(attention_output_name, [10, 10], 'matmul.weight', output_name)
+        
+        # make graph
+        query_tensor = helper.make_tensor_value_info(query_name, TensorProto.FLOAT, [1, -1, 10])
+        key_tensor = helper.make_tensor_value_info(key_name, TensorProto.FLOAT, [1, -1, 10])
+        output_tensor = helper.make_tensor_value_info(output_name, TensorProto.FLOAT, [1, -1, 10])
+        
+        graph_name = 'cross_attention_test'
+        graph = helper.make_graph([cross_attention_node, matmul_node], graph_name,
+                                  [query_tensor, key_tensor], [output_tensor], initializer=initializers)
+        model = helper.make_model(graph, producer_name='espnet_onnx', opset_imports=[
+            helper.make_opsetid('espnet_onnx', 1), helper.make_opsetid('', 13)])
+        model.ir_version = onnx.IR_VERSION
+
+        onnx.save(model, output_model_path)
+        
     def static_quant_test(self, model_fp32_path, data_reader, activation_type, weight_type, extra_options={}):
         activation_proto_qtype = TensorProto.UINT8 if activation_type == QuantType.QUInt8 else TensorProto.INT8
         activation_type_str = 'u8' if (activation_type == QuantType.QUInt8) else 's8'
@@ -175,6 +236,13 @@ class TestOpGEMM(unittest.TestCase):
         check_op_type_count(self, model_int8_path, **quant_nodes)
         check_model_correctness(self, model_fp32_path, model_int8_path, {'input': np.random.rand(1, 5, 10).astype(np.float32)})
 
+    def dynamic_cross_attention_quant_test(self, model_fp32_path, model_int8_path, per_channel, reduce_range):
+        quantize_dynamic(model_fp32_path, model_int8_path, per_channel=per_channel, reduce_range=reduce_range)
+        quant_nodes = {'QCrossAttention': 1, 'MatMulInteger': }
+        check_op_type_count(self, model_int8_path, **quant_nodes)
+        check_model_correctness(self, model_fp32_path, model_int8_path,
+                {'query': np.random.rand(1, 5, 10).astype(np.float32), 'key': np.random.rand(1, 5, 10).astype(np.float32)})
+
     def test_quantize_gemm(self):
         np.random.seed(1)
         model_fp32_path = 'gemm_fp32.onnx'
@@ -210,6 +278,17 @@ class TestOpGEMM(unittest.TestCase):
         self.dynamic_attention_quant_test(model_fp32_path, model_int8_path, True, False)
         self.dynamic_attention_quant_test(model_fp32_path, model_int8_path, False, True)
         self.dynamic_attention_quant_test(model_fp32_path, model_int8_path, False, False)
+
+    def test_quantize_cross_attention(self):
+        np.random.seed(1)
+        model_fp32_path = 'cross_attention_fp32.onnx'
+        model_int8_path = 'cross_attention_fp32.quant.onnx'
+        self.construct_model_cross_attention(model_fp32_path)
+
+        self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, True, True)
+        self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, True, False)
+        self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, False, True)
+        self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, False, False)
 
 
 if __name__ == '__main__':

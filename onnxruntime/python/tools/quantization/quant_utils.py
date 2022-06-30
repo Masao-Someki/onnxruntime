@@ -10,6 +10,7 @@ __producer__ = "onnx.quantize"
 __version__ = "0.1.0"
 onnx_domain = "ai.onnx"
 ms_domain = "com.microsoft"
+espnet_onnx_domain = "espnet_onnx"
 
 type_to_name = {
     1: "FLOAT",

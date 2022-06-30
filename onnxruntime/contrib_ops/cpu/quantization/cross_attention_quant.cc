@@ -63,7 +63,6 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
   //   Input  7 - weight_zero_point : scalar for per tensor quantization, (3 * hidden_size) for per column quantization
   //   Input  8 - past              : (2, batch_size, num_heads, past_sequence_length, head_size)
   //   Output 0                     : (batch_size, sequence_length, hidden_size)
-  //   Output 1 - present           : (2, batch_size, num_heads, past_sequence_length + sequence_length, head_size)
   //   ORT_RETURN_IF_ERROR(CheckInputs(context));
   const Tensor* query = context->Input<Tensor>(0);
   const Tensor* key = context->Input<Tensor>(1);
@@ -71,11 +70,15 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
   const Tensor* kv_weights = packed_weights_ ? nullptr : context->Input<Tensor>(3);
   const Tensor* q_bias = context->Input<Tensor>(4);
   const Tensor* kv_bias = context->Input<Tensor>(5);
-  const Tensor* input_scale_tensor = context->Input<Tensor>(6);
-  const Tensor* weight_scale_tensor = context->Input<Tensor>(7);
-  const Tensor* mask_index = context->Input<Tensor>(8);
-  const Tensor* i_zp_tensor = context->Input<Tensor>(9);
-  const Tensor* w_zp_tensor = context->Input<Tensor>(10);
+  const Tensor* query_scale_tensor = context->Input<Tensor>(6);
+  const Tensor* key_scale_tensor = context->Input<Tensor>(7);
+  const Tensor* query_weight_scale_tensor = context->Input<Tensor>(8);
+  const Tensor* key_weight_scale_tensor = context->Input<Tensor>(9);
+  const Tensor* mask_index = context->Input<Tensor>(10);
+  const Tensor* query_zp_tensor = context->Input<Tensor>(11);
+  const Tensor* key_zp_tensor = context->Input<Tensor>(12);
+  const Tensor* qw_zp_tensor = context->Input<Tensor>(13);
+  const Tensor* kw_zp_tensor = context->Input<Tensor>(14);
 
   const TensorShape& q_weights_shape = (packed_weights_ ? q_weight_shape_ : q_weights->Shape());
   const TensorShape& kv_weights_shape = (packed_weights_ ? kv_weight_shape_ : kv_weights->Shape());
@@ -87,31 +90,53 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
                                                  kv_bias->Shape(),
                                                  mask_index));
 
-  ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(input_scale_tensor),
+  ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(query_scale_tensor),
                     "input scale must be a scalar or 1D tensor of size 1");
-  T input_scale = *(input_scale_tensor->template Data<T>());
+  ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(key_scale_tensor),
+                    "input scale must be a scalar or 1D tensor of size 1");
+  T query_scale = *(query_scale_tensor->template Data<T>());
+  T key_scale = *(key_scale_tensor->template Data<T>());
 
-  bool is_weight_scale_per_column = !IsScalarOr1ElementVector(weight_scale_tensor);
-  const T* weight_scale_data = weight_scale_tensor->template Data<T>();
+  bool is_q_weight_scale_per_column = !IsScalarOr1ElementVector(query_weight_scale_tensor);
+  bool is_k_weight_scale_per_column = !IsScalarOr1ElementVector(key_weight_scale_tensor);
+  const T* q_weight_scale_data = query_weight_scale_tensor->template Data<T>();
+  const T* k_weight_scale_data = key_weight_scale_tensor->template Data<T>();
 
-  std::vector<T> dequant_scales(weight_scale_data, weight_scale_data + weight_scale_tensor->Shape().Size());
-  std::for_each(dequant_scales.begin(), dequant_scales.end(), [&input_scale](float& dequant_scale) {
-    return dequant_scale *= input_scale;
+  std::vector<T> q_dequant_scales(q_weight_scale_data, q_weight_scale_data + query_weight_scale_tensor->Shape().Size());
+  std::vector<T> k_dequant_scales(k_weight_scale_data, k_weight_scale_data + key_weight_scale_tensor->Shape().Size());
+  std::for_each(q_dequant_scales.begin(), q_dequant_scales.end(), [&query_scale](float& q_dequant_scale) {
+    return q_dequant_scale *= query_scale;
+  });
+  std::for_each(k_dequant_scales.begin(), k_dequant_scales.end(), [&key_scale](float& k_dequant_scale) {
+    return k_dequant_scale *= key_scale;
   });
 
-  uint8_t input_zero_point = 0;
-  if (i_zp_tensor != nullptr) {
-    ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(i_zp_tensor),
+  uint8_t query_zero_point = 0;
+  if (query_zp_tensor != nullptr) {
+    ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(query_zp_tensor),
                       "input zero point must be a scalar or 1D tensor of size 1.");
-    input_zero_point = *i_zp_tensor->template Data<uint8_t>();
+    query_zero_point = *query_zp_tensor->template Data<uint8_t>();
+  }
+  uint8_t key_zero_point = 0;
+  if (key_zp_tensor != nullptr) {
+    ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(key_zp_tensor),
+                      "input zero point must be a scalar or 1D tensor of size 1.");
+    key_zero_point = *key_zp_tensor->template Data<uint8_t>();
   }
 
-  bool is_weight_zp_per_column = false;
-  uint8_t weight_zp_default = 0;
-  const uint8_t* weight_zp_data = nullptr;
-  if (w_zp_tensor != nullptr) {
-    is_weight_zp_per_column = !IsScalarOr1ElementVector(w_zp_tensor);
-    weight_zp_data = static_cast<const uint8_t*>(w_zp_tensor->DataRaw());
+  bool is_q_weight_zp_per_column = false;
+  uint8_t q_weight_zp_default = 0;
+  const uint8_t* q_weight_zp_data = nullptr;
+  if (qw_zp_tensor != nullptr) {
+    is_q_weight_zp_per_column = !IsScalarOr1ElementVector(qw_zp_tensor);
+    q_weight_zp_data = static_cast<const uint8_t*>(qw_zp_tensor->DataRaw());
+  }
+  bool is_k_weight_zp_per_column = false;
+  uint8_t k_weight_zp_default = 0;
+  const uint8_t* k_weight_zp_data = nullptr;
+  if (kw_zp_tensor != nullptr) {
+    is_k_weight_zp_per_column = !IsScalarOr1ElementVector(kw_zp_tensor);
+    k_weight_zp_data = static_cast<const uint8_t*>(kw_zp_tensor->DataRaw());
   }
 
   const auto& q_shape = query->Shape();
@@ -169,8 +194,8 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
 
       int input_offset = batch_index * sequence_length * q_hidden_size;
       int weights_offset = head_index * head_size;
-      int weights_scale_offset = is_weight_scale_per_column ? weights_offset : 0;
-      int weights_zp_offset = is_weight_zp_per_column ? weights_offset : 0;
+      int weights_scale_offset = is_q_weight_scale_per_column ? weights_offset : 0;
+      int weights_zp_offset = is_q_weight_zp_per_column ? weights_offset : 0;
       int q_offset = (batch_index * num_heads_ + head_index) * (sequence_length * head_size);
 
       //                   original           transposed            iteration
@@ -180,15 +205,15 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
 
       scale_bias_procs.emplace_back(Q + q_offset,
                                     head_size,
-                                    dequant_scales.data() + weights_scale_offset,
+                                    q_dequant_scales.data() + weights_scale_offset,
                                     bias_data + weights_offset,
                                     MLAS_QGEMM_OUTPUT_MODE::ZeroMode,
-                                    is_weight_scale_per_column ? MLAS_QUANTIZATION_GRANULARITY::PerColumn : MLAS_QUANTIZATION_GRANULARITY::PerMatrix);
+                                    is_q_weight_scale_per_column ? MLAS_QUANTIZATION_GRANULARITY::PerColumn : MLAS_QUANTIZATION_GRANULARITY::PerMatrix);
 
       auto& gemm_params = gemm_data_vec[i];
       gemm_params.A = input_data + input_offset;
       gemm_params.lda = q_hidden_size;
-      gemm_params.ZeroPointA = input_zero_point;
+      gemm_params.ZeroPointA = query_zero_point;
       if (packed_weights_) {
         const auto* packed_weight =
             static_cast<const uint8_t*>(packed_weights_.get()) + packed_weights_size_ * (weights_offset / head_size);
@@ -198,8 +223,8 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
         gemm_params.B = weights_data + weights_offset;
         gemm_params.ldb = q_hidden_size;
       }
-      gemm_params.ZeroPointB = nullptr != weight_zp_data ? weight_zp_data + weights_zp_offset : &weight_zp_default;
-      gemm_params.PerColumnZeroPoints = is_weight_zp_per_column;
+      gemm_params.ZeroPointB = nullptr != q_weight_zp_data ? q_weight_zp_data + weights_zp_offset : &q_weight_zp_default;
+      gemm_params.PerColumnZeroPoints = is_q_weight_zp_per_column;
       gemm_params.C = reinterpret_cast<int32_t*>(Q + q_offset);
       gemm_params.ldc = head_size;
       gemm_params.OutputProcessor = &(scale_bias_procs[i]);
@@ -234,8 +259,8 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
 
       int input_offset = batch_index * kv_sequence_length * kv_hidden_size;
       int weights_offset = kv_index * kv_hidden_size + head_index * head_size;
-      int weights_scale_offset = is_weight_scale_per_column ? weights_offset : 0;
-      int weights_zp_offset = is_weight_zp_per_column ? weights_offset : 0;
+      int weights_scale_offset = is_k_weight_scale_per_column ? weights_offset : 0;
+      int weights_zp_offset = is_k_weight_zp_per_column ? weights_offset : 0;
       float* kv_dest = KV[kv_index];
       int kv_offset = (batch_index * num_heads_ + head_index) * (kv_sequence_length * head_size);
 
@@ -246,15 +271,15 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
 
       scale_bias_procs.emplace_back(kv_dest + kv_offset,
                                     head_size,
-                                    dequant_scales.data() + weights_scale_offset,
+                                    k_dequant_scales.data() + weights_scale_offset,
                                     bias_data + weights_offset,
                                     MLAS_QGEMM_OUTPUT_MODE::ZeroMode,
-                                    is_weight_scale_per_column ? MLAS_QUANTIZATION_GRANULARITY::PerColumn : MLAS_QUANTIZATION_GRANULARITY::PerMatrix);
+                                    is_k_weight_scale_per_column ? MLAS_QUANTIZATION_GRANULARITY::PerColumn : MLAS_QUANTIZATION_GRANULARITY::PerMatrix);
 
       auto& gemm_params = gemm_data_vec[i];
       gemm_params.A = input_data + input_offset;
       gemm_params.lda = kv_hidden_size;
-      gemm_params.ZeroPointA = input_zero_point;
+      gemm_params.ZeroPointA = key_zero_point;
       if (packed_weights_) {
         const auto* packed_weight =
             static_cast<const uint8_t*>(packed_weights_.get()) + packed_weights_size_ * (weights_offset / head_size);
@@ -264,8 +289,8 @@ Status QCrossAttention<T>::Compute(OpKernelContext* context) const {
         gemm_params.B = weights_data + weights_offset;
         gemm_params.ldb = static_cast<int64_t>(2) * kv_hidden_size;
       }
-      gemm_params.ZeroPointB = nullptr != weight_zp_data ? weight_zp_data + weights_zp_offset : &weight_zp_default;
-      gemm_params.PerColumnZeroPoints = is_weight_zp_per_column;
+      gemm_params.ZeroPointB = nullptr != k_weight_zp_data ? k_weight_zp_data + weights_zp_offset : &k_weight_zp_default;
+      gemm_params.PerColumnZeroPoints = is_k_weight_zp_per_column;
       gemm_params.C = reinterpret_cast<int32_t*>(kv_dest + kv_offset);
       gemm_params.ldc = head_size;
       gemm_params.OutputProcessor = &(scale_bias_procs[i]);
