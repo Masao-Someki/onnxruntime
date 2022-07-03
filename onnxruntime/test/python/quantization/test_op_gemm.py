@@ -238,7 +238,7 @@ class TestOpGEMM(unittest.TestCase):
 
     def dynamic_cross_attention_quant_test(self, model_fp32_path, model_int8_path, per_channel, reduce_range):
         quantize_dynamic(model_fp32_path, model_int8_path, per_channel=per_channel, reduce_range=reduce_range)
-        quant_nodes = {'QCrossAttention': 1, 'MatMulInteger': }
+        quant_nodes = {'QCrossAttention': 1, 'MatMulInteger': 1}
         check_op_type_count(self, model_int8_path, **quant_nodes)
         check_model_correctness(self, model_fp32_path, model_int8_path,
                 {'query': np.random.rand(1, 5, 10).astype(np.float32), 'key': np.random.rand(1, 5, 10).astype(np.float32)})

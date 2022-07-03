@@ -15,7 +15,7 @@ from onnxruntime.transformers.fusion_options import AttentionMaskFormat
 from onnxruntime.transformers.fusion_utils import FusionUtils, NumpyHelper
 from onnxruntime.transformers.onnx_model import OnnxModel
 from onnxruntime.transformers.shape_infer_helper import SymbolicShapeInferenceHelper, get_shape_from_type_proto
-from .fusion_attention import AttentionMask
+from fusion_attention import AttentionMask
 
 
 logger = getLogger(__name__)

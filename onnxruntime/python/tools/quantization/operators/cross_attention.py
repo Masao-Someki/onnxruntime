@@ -31,7 +31,7 @@ class CrossAttentionQuant(QuantOperatorBase):
         inputs.extend(quantized_input_names) # query, key, q_weights, kv_weights
         inputs.extend([node.input[4], node.input[5]]) # q_bias, kv_bias
         inputs.extend(scale_names) # input_scale, weight_scale
-        inputs.extend([node.input[6] if len(node.input) > 3 else ""]) # mask_index
+        inputs.extend([node.input[6] if len(node.input) > 6 else ""]) # mask_index
         inputs.extend(zero_point_names) # zero points
 
         kwargs = {}

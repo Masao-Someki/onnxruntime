@@ -38,7 +38,7 @@ class ESPnetOptimizationOptions(FusionOptions):
         super().__init__(model_type)
 
 
-class ESPnetOptimizer(OnnxModel):
+class ESPnetOnnxModel(OnnxModel):
     def __init__(
         self,
         model: ModelProto,
@@ -64,7 +64,6 @@ class ESPnetOptimizer(OnnxModel):
             self.hidden_size,
             self.num_heads,
             self.attention_mask,
-            unidirectional
         )
         self.cross_attention_fusion = FusionCrossAttention(
             self,
