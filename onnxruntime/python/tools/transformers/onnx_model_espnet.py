@@ -38,13 +38,12 @@ class ESPnetOptimizationOptions(FusionOptions):
         super().__init__(model_type)
 
 
-class ESPnetOnnxModel(OnnxModel):
+class ESPnetOnnxEncoder(OnnxModel):
     def __init__(
         self,
         model: ModelProto,
         num_heads: int = 0,
-        hidden_size: int = 0,
-        unidirectional: bool = False
+        hidden_size: int = 0
     ):
         """Initialize ESPnet ONNX Model.
         Args:
@@ -63,7 +62,7 @@ class ESPnetOnnxModel(OnnxModel):
             self,
             self.hidden_size,
             self.num_heads,
-            self.attention_mask,
+            self.attention_mask
         )
         self.cross_attention_fusion = FusionCrossAttention(
             self,
@@ -457,3 +456,16 @@ class ESPnetOnnxModel(OnnxModel):
             logger.warning("Attention not fused")
 
         return is_perfect
+
+
+class ESPnetOnnxDecoder(ESPnetOnnxEncoder):
+    def __init__(
+        self,
+        model: ModelProto,
+        num_heads: int = 0,
+        hidden_size: int = 0
+    ):
+        super().__init__(
+            model, num_heads, hidden_size
+        )
+    

@@ -269,50 +269,79 @@ class FusionCrossAttention(Fusion):
         qkv_nodes = self.model.match_parent_path(
             start_node,
             ["Add", "MatMul", "Reshape", "Transpose", "MatMul"],
-            [1, None, 0, 0, 0],
+            [0, None, 0, 0, 0],
         )
         if qkv_nodes is not None:
             (_, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
         else:
             return
         
-        other_inputs = []
-        for i, input in enumerate(start_node.input):
-            if input not in output_name_to_node:
-                continue
+        # find the root input
+        residual_nodes = None
+        residual_nodes = self.model.match_parent_path(
+            start_node,
+            ["Add", "Add", "MatMul", "Reshape"],
+            [1, 0, None, 0],
+        )
+        if residual_nodes is not None:
+            (input_to_ln, _, _, _) = residual_nodes
+        
+        if residual_nodes is None:
+            residual_nodes = self.model.match_parent_path(
+                start_node,
+                ["Slice", "Concat", "Add"],
+                [1, None, 1],
+            )
+            if residual_nodes is not None:
+                (_, input_to_ln, _) = residual_nodes
+        
+        if residual_nodes is None:
+            residual_nodes = self.model.match_parent_path(
+                start_node,
+                ["Slice", "Add", "Slice"],
+                [1, None, 1],
+            )
+            if residual_nodes is not None:
+                (_, input_to_ln, _) = residual_nodes
 
-            if input == qkv_nodes[0].output[0]:
-                continue
-            other_inputs.append(input)
-        if len(other_inputs) != 1:
+        if residual_nodes is None:
             return
-
-        root_input = other_inputs[0]
-        if normalize_node.op_type == "LayerNormalization":
-            children = input_name_to_nodes[root_input]
-            for child in children:
-                if child.op_type == "LayerNormalization":
-                    root_input = child.output[0]
-
+    
+        root_input = None
+        children = input_name_to_nodes[input_to_ln.output[0]]
+        for c in children:
+            if c.op_type == "LayerNormalization":
+                root_input = c.output[0]
+                break
+            
         children = input_name_to_nodes[root_input]
-        children_types = [child.op_type for child in children]
-        if children_types.count("MatMul") != 1:
+        for c in children:
+            if c.op_type == "Slice":
+                root_input = c.output[0]
+                break
+            
+        if root_input is None:
             return
-
+        
         v_nodes = self.model.match_parent_path(matmul_qkv, ["Transpose", "Reshape", "Add", "MatMul"], [1, 0, 0, None])
         if v_nodes is None:
             logger.debug("fuse_cross_attention: failed to match v path")
             return
         (_, _, add_v, matmul_v) = v_nodes
 
+        attention_with_mask = False
         qk_nodes = self.model.match_parent_path(matmul_qkv,
                 ["Softmax", "Div", "MatMul"], [0, None, 0])
-
+        
         if qk_nodes is None:
-            logger.debug("fuse_cross_attention: failed to match qk path")
-            return
-
-        (_, _, matmul_qk) = qk_nodes
+            attention_with_mask = True
+            qk_nodes = self.model.match_parent_path(matmul_qkv,
+                ["Softmax","Add", "Div", "MatMul"], [0, 0, None, 0])
+            if qk_nodes is None:
+                return
+            (_, add_qk, _, matmul_qk) = qk_nodes
+        else:
+            (_, _, matmul_qk) = qk_nodes
 
         q_nodes = self.model.match_parent_path(matmul_qk, ["Transpose", "Reshape", "Add", "MatMul"], [0, 0, 0, None])
         if q_nodes is None:
@@ -325,15 +354,24 @@ class FusionCrossAttention(Fusion):
             return
         (_, _, add_k, matmul_k) = k_nodes
 
+        mask_index = None
+        if attention_with_mask:
+            _, *mask_nodes, _ = self.model.match_parent_path(
+                add_qk, ['Mul', 'Sub', 'Unsqueeze', 'Unsqueeze'],
+                [None, 0, 1, 0])
+            if mask_nodes is None:
+                return
+            mask_index = self.attention_mask.process_mask(mask_nodes[-1].input[0])
+            
         # Note that Cast might be removed by OnnxRuntime so we match two patterns here.
-        if matmul_v.input[0] == matmul_k.input[0] and matmul_q.input[0] == root_input:
+        if matmul_v.input[0] == matmul_k.input[0]:
             attention_last_node = reshape_qkv
 
             q_num_heads, q_hidden_size = self.get_num_heads_and_hidden_size(reshape_q)
             # number of heads are same for all the paths, hence to create attention node, we pass the q_num_heads
             # the input_hidden_size represents the input hidden size, this is used as needed but hidden sizes for Q, K are extracted appropriately
             new_node = self.create_attention_node(
-                None,
+                mask_index,
                 matmul_q,
                 matmul_k,
                 matmul_v,

@@ -29,7 +29,7 @@ from onnx_model_bert_tf import BertOnnxModelTF
 from onnx_model_bert_keras import BertOnnxModelKeras
 from onnx_model_gpt2 import Gpt2OnnxModel
 from onnx_model_tnlr import TnlrOnnxModel
-from onnx_model_espnet import ESPnetOnnxModel
+from onnx_model_espnet import ESPnetOnnxEncoder, ESPnetOnnxDecoder
 from fusion_options import FusionOptions
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,8 @@ MODEL_TYPES = {
     "gpt2": (Gpt2OnnxModel, "pytorch", 1),
     "gpt2_tf": (Gpt2OnnxModel, 'tf2onnx', 0),  # might add a class for GPT2OnnxModel for TF later.
     "tnlr": (TnlrOnnxModel, "pytorch", 1),
-    "espnet": (ESPnetOnnxModel, "pytorch", 1),
+    "espnet_transformer_encoder": (ESPnetOnnxEncoder, "pytorch", 1),
+    "espnet_transformer_decoder": (ESPnetOnnxDecoder, "pytorch", 1),
 }
 
 
