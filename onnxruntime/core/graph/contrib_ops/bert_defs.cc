@@ -236,6 +236,39 @@ ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(CrossAttention, 1,
                                   CrossAttentionTypeAndShapeInference(ctx);
                                 }));
 
+constexpr const char* RelPos_Attention_doc = R"DOC(
+This RelPosAttention supports self attention and cross attention, key and value cache, and key_padding_mask. The attention mask is not support at the moment.
+Some boolean parameters are passed by runtime input for generic purpose
+)DOC";
+
+ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(RelPosAttention, 1,
+                            OpSchema()
+                                .SetDomain(kENDomain)
+                                .SetDoc(RelPos_Attention_doc)
+                                .SinceVersion(1)
+                                .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                .Attr("qkv_hidden_sizes",
+                                      "Hidden layer sizes of Q, K, V paths in Attention",
+                                      AttributeProto::INTS,
+                                      OPTIONAL_VALUE)
+                                .Input(0, "input", "3D input tensor with shape (batch_size, sequence_length, hidden_size), hidden_size = num_heads * head_size", "T")
+                                .Input(1, "weights", "3D input tensor with shape (3 * sequence_length, hidden_size)", "T")
+                                .Input(2, "bias", "2D input tensor with shape (3 * hidden_size)", "T")
+                                .Input(3, "pos_emb", "2D input tensor with shape (batch_size, 2 * sequence_length - 1, hidden_size)", "T")
+                                .Input(4, "pos_bias", "1D input tensor with shape (hidden_size)", "T")
+                                .Input(5, "pos_bias_u", "1D input tensor with shape (num_head, head_size)", "T")
+                                .Input(5, "pos_bias_v", "1D input tensor with shape (num_head, head_size)", "T")
+                                .Input(6, "mask_index",
+                                       "Attention mask with shape (batch_size, 1, max_sequence_length, max_sequence_length), (batch_size, past_sequence_length + sequence_length)"
+                                       "or (batch_size, sequence_length, past_sequence_length + sequence_length), or index with shape (batch_size) or (2 * batch_size).",
+                                       "M", OpSchema::Optional)
+                                .Output(0, "output", "3D output tensor with shape (sequence_length, batch_size, hidden_size)", "T")
+                                .TypeConstraint("T", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float and float16 tensors.")
+                                .TypeConstraint("M", {"tensor(int32)"}, "Constrain mask index to integer types")
+                                .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                  AttentionTypeAndShapeInference(ctx, 0);
+                                }));
+
 constexpr const char* EmbedLayerNormalization_ver1_doc = R"DOC(
 EmbedLayerNormalization is the fusion of embedding layer in BERT model, with optional mask processing.
 The embedding layer takes input_ids (word IDs) and segment_ids (sentence IDs) to look up word_embedding, position_embedding,
