@@ -19,7 +19,6 @@ class RelPosAttentionBase {
                       const TensorShape& pos_emb_shape,
                       const TensorShape& pos_bias_u_shape,
                       const TensorShape& pos_bias_v_shape,
-                      const Tensor*& mask_index,
                       const int max_threads_per_block) const;
 
  protected:
@@ -38,8 +37,7 @@ class RelPosAttentionBase {
                       const TensorShape& bias_shape,
                       const TensorShape& pos_emb_shape,
                       const TensorShape& pos_bias_u_shape,
-                      const TensorShape& pos_bias_v_shape,
-                     const Tensor*& mask_index) const;
+                      const TensorShape& pos_bias_v_shape) const;
 
   int num_heads_;
   std::vector<int64_t> qkv_hidden_sizes_;   // Q, K, V path hidden layer sizes

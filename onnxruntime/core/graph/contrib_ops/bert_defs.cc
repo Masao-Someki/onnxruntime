@@ -103,6 +103,18 @@ void CrossAttentionTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) 
   }
 }
 
+
+void RelPosAttentionTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) {
+  // Type inference
+  ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+  
+  // Shape inference
+  if (hasInputShape(ctx, 0)) {
+    auto& input_shape = getInputShape(ctx, 0);
+    updateOutputShape(ctx, 0, input_shape);
+  }
+}
+
 constexpr const char* Attention_ver1_doc = R"DOC(
 Multi-Head Self Attention that can be either unidirectional (like GPT-2) or bidirectional (like BERT).
 The mask_index input is optional. Besides raw attention mask with shape (batch_size, past_sequence_length + sequence_length)
@@ -255,18 +267,14 @@ ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(RelPosAttention, 1,
                                 .Input(1, "weights", "3D input tensor with shape (3 * sequence_length, hidden_size)", "T")
                                 .Input(2, "bias", "2D input tensor with shape (3 * hidden_size)", "T")
                                 .Input(3, "pos_emb", "2D input tensor with shape (batch_size, 2 * sequence_length - 1, hidden_size)", "T")
-                                .Input(4, "pos_bias", "1D input tensor with shape (hidden_size)", "T")
+                                .Input(4, "pos_weights", "1D input tensor with shape (hidden_size)", "T")
                                 .Input(5, "pos_bias_u", "1D input tensor with shape (num_head, head_size)", "T")
-                                .Input(5, "pos_bias_v", "1D input tensor with shape (num_head, head_size)", "T")
-                                .Input(6, "mask_index",
-                                       "Attention mask with shape (batch_size, 1, max_sequence_length, max_sequence_length), (batch_size, past_sequence_length + sequence_length)"
-                                       "or (batch_size, sequence_length, past_sequence_length + sequence_length), or index with shape (batch_size) or (2 * batch_size).",
-                                       "M", OpSchema::Optional)
+                                .Input(6, "pos_bias_v", "1D input tensor with shape (num_head, head_size)", "T")
                                 .Output(0, "output", "3D output tensor with shape (sequence_length, batch_size, hidden_size)", "T")
                                 .TypeConstraint("T", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float and float16 tensors.")
                                 .TypeConstraint("M", {"tensor(int32)"}, "Constrain mask index to integer types")
                                 .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
-                                  AttentionTypeAndShapeInference(ctx, 0);
+                                  RelPosAttentionTypeAndShapeInference(ctx);
                                 }));
 
 constexpr const char* EmbedLayerNormalization_ver1_doc = R"DOC(

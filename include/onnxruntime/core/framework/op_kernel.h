@@ -186,6 +186,9 @@ using BuildKernelCreateInfoFn = KernelCreateInfo (*)();
 #define ONNX_CPU_OPERATOR_ML_KERNEL(name, ver, builder, ...) \
   ONNX_OPERATOR_KERNEL_EX(name, kMLDomain, ver, kCpuExecutionProvider, builder, __VA_ARGS__)
 
+#define ONNX_CPU_OPERATOR_EN_KERNEL(name, ver, builder, ...) \
+  ONNX_OPERATOR_KERNEL_EX(name, kENDomain, ver, kCpuExecutionProvider, builder, __VA_ARGS__)
+
 #define ONNX_OPERATOR_KERNEL_EX(name, domain, ver, provider, builder, ...)                                            \
   class ONNX_OPERATOR_KERNEL_CLASS_NAME(provider, domain, ver, name);                                                 \
   template <>                                                                                                         \
@@ -208,6 +211,9 @@ using BuildKernelCreateInfoFn = KernelCreateInfo (*)();
 
 #define ONNX_CPU_OPERATOR_VERSIONED_ML_KERNEL(name, startver, endver, builder, ...) \
   ONNX_OPERATOR_VERSIONED_KERNEL_EX(name, kMLDomain, startver, endver, kCpuExecutionProvider, builder, __VA_ARGS__)
+
+#define ONNX_CPU_OPERATOR_VERSIONED_EN_KERNEL(name, startver, endver, builder, ...) \
+  ONNX_OPERATOR_VERSIONED_KERNEL_EX(name, kENDomain, startver, endver, kCpuExecutionProvider, builder, __VA_ARGS__)
 
 #define ONNX_OPERATOR_VERSIONED_KERNEL_EX(name, domain, startver, endver, provider, builder, ...)                     \
   class ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(provider, domain, startver, endver, name);                          \
@@ -234,6 +240,9 @@ using BuildKernelCreateInfoFn = KernelCreateInfo (*)();
 
 #define ONNX_CPU_OPERATOR_TYPED_MS_KERNEL(name, ver, type, builder, ...) \
   ONNX_OPERATOR_TYPED_KERNEL_EX(name, kMSDomain, ver, type, kCpuExecutionProvider, builder, __VA_ARGS__)
+
+#define ONNX_CPU_OPERATOR_TYPED_EN_KERNEL(name, ver, type, builder, ...) \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(name, kENDomain, ver, type, kCpuExecutionProvider, builder, __VA_ARGS__)
 
 #define ONNX_OPERATOR_TYPED_KERNEL_EX(name, domain, ver, type, provider, builder, ...)                                \
   class ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(provider, domain, ver, type, name);                                     \
@@ -279,6 +288,10 @@ using BuildKernelCreateInfoFn = KernelCreateInfo (*)();
 
 #define ONNX_CPU_OPERATOR_VERSIONED_TYPED_MS_KERNEL(name, startver, endver, type, builder, ...)                    \
   ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(name, kMSDomain, startver, endver, type, kCpuExecutionProvider, builder, \
+                                          __VA_ARGS__)
+
+#define ONNX_CPU_OPERATOR_VERSIONED_TYPED_EN_KERNEL(name, startver, endver, type, builder, ...)                    \
+  ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(name, kENDomain, startver, endver, type, kCpuExecutionProvider, builder, \
                                           __VA_ARGS__)
 
 #define ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_EX(name, domain, startver, endver, type, provider, builder, ...)         \

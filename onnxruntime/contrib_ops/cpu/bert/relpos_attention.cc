@@ -37,12 +37,11 @@ ONNX_OPERATOR_TYPED_KERNEL_EX(
     RelPosAttention<float>);
 
 Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
-                                  const TensorShape& weights_shape,
-                                  const TensorShape& bias_shape,
-                                  const TensorShape& pos_emb_shape,
-                                  const TensorShape& pos_bias_u_shape,
-                                  const TensorShape& pos_bias_v_shape,
-                                  const Tensor*& mask_index) const {
+                                        const TensorShape& weights_shape,
+                                        const TensorShape& bias_shape,
+                                        const TensorShape& pos_emb_shape,
+                                        const TensorShape& pos_bias_u_shape,
+                                        const TensorShape& pos_bias_v_shape) const {
   // Input shapes:
   //   input       : (batch_size, sequence_length, input_hidden_size)
   //   weights     : (input_hidden_size, 3 * hidden_size)
@@ -62,7 +61,6 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
     return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Input 'input' is expected to have 3 dimensions, got ",
                            dims.size());
   }
-  int batch_size = static_cast<int>(dims[0]);
   int sequence_length = static_cast<int>(dims[1]);
 
   const auto& weights_dims = weights_shape.GetDims();
@@ -114,7 +112,7 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
 
     if (qkv_hidden_sizes_[0] != qkv_hidden_sizes_[1]) {
       return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT,
-                            "qkv_hidden_sizes first element should be same as the second");
+                             "qkv_hidden_sizes first element should be same as the second");
     }
 
     for (size_t i = 0; i < qkv_hidden_sizes_.size(); i++) {
@@ -149,53 +147,21 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
                            "The length of input 'pos_emb' should be 2 * sequence_length - 1");
   }
 
-  if (mask_index != nullptr) {  // mask_index is optional
-    const auto& mask_dims = mask_index->Shape().GetDims();
-    if (mask_dims.size() == 1) {
-      if (static_cast<int>(mask_dims[0]) != batch_size && static_cast<int>(mask_dims[0]) != 2 * batch_size) {
-        return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 1D data shall have length of batch_size or 2 * batch_size");
-      }
-    } else if (mask_dims.size() == 2) {
-      if (static_cast<int>(mask_dims[0]) != batch_size || static_cast<int>(mask_dims[1]) != sequence_length) {
-        // Add operator supports broadcasting. Here we handle a case with only one element in the 2nd dimension.
-        if ((static_cast<int>(mask_dims[0]) == batch_size || static_cast<int>(mask_dims[0]) == 1) && static_cast<int>(mask_dims[1]) == 1) {
-          // Mask will have same value after propogation, which has same effect as no mask.
-          mask_index = nullptr;
-        } else {
-          return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 2D data shall have shape batch_size x sequence_length");
-        }
-      }
-    } else if (mask_dims.size() == 3) {
-      if (static_cast<int>(mask_dims[0]) != batch_size || mask_dims[1] != sequence_length || static_cast<int>(mask_dims[2]) != sequence_length) {
-        return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 3D data shall have shape batch_size x sequence_length x sequence_length");
-      }
-    } else if (mask_dims.size() == 4) {
-      if (static_cast<int>(mask_dims[0]) != batch_size || mask_dims[1] != 1 || mask_dims[2] != mask_dims[3] || mask_dims[2] < sequence_length) {
-        return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 4D data shall have shape batch_size x 1 x max_sequence_length x max_sequence_length)");
-      }
-    } else {
-      return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Input 'mask_index' is expected to have 1, 2, 3 or 4 dimensions, got ",
-                             mask_dims.size());
-    }
-  }
-
   return Status::OK();
 }
 
-
 Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
-                                  const TensorShape& weight_shape,
-                                  const TensorShape& bias_shape,
-                                  const TensorShape& pos_emb_shape,
-                                  const TensorShape& pos_bias_u_shape,
-                                  const TensorShape& pos_bias_v_shape,
-                                  const Tensor*& mask_index,
-                                  const int max_threads_per_block) const {
+                                        const TensorShape& weight_shape,
+                                        const TensorShape& bias_shape,
+                                        const TensorShape& pos_emb_shape,
+                                        const TensorShape& pos_bias_u_shape,
+                                        const TensorShape& pos_bias_v_shape,
+                                        const int max_threads_per_block) const {
   if (num_heads_ > max_threads_per_block) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "num_heads should be no larger than ", max_threads_per_block);
   }
 
-  return CheckInputs(input_shape, weight_shape, bias_shape, pos_emb_shape, pos_bias_u_shape, pos_bias_v_shape, mask_index);
+  return CheckInputs(input_shape, weight_shape, bias_shape, pos_emb_shape, pos_bias_u_shape, pos_bias_v_shape);
 }
 
 template <typename T>
@@ -209,25 +175,21 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
   const Tensor* bias = context->Input<Tensor>(2);
   const Tensor* pos_emb = context->Input<Tensor>(3);
   const Tensor* pos_weights = context->Input<Tensor>(4);
-  const Tensor* pos_bias = context->Input<Tensor>(5);
-  const Tensor* pos_bias_u = context->Input<Tensor>(6);
-  const Tensor* pos_bias_v = context->Input<Tensor>(7);
-  const Tensor* mask_index = context->Input<Tensor>(8);
+  const Tensor* pos_bias_u = context->Input<Tensor>(5);
+  const Tensor* pos_bias_v = context->Input<Tensor>(6);
   ORT_RETURN_IF_ERROR(CheckInputs(input->Shape(),
                                   weights->Shape(),
                                   bias->Shape(),
                                   pos_emb->Shape(),
                                   pos_bias_u->Shape(),
-                                  pos_bias_v->Shape(),
-                                  mask_index));
+                                  pos_bias_v->Shape()));
 
   const auto shape = input->Shape().GetDims();
-  const auto pos_shape = pos_emb->Shape().GetDims();
   const int batch_size = static_cast<int>(shape[0]);
   const int sequence_length = static_cast<int>(shape[1]);
-  const int pos_sequence_length = static_cast<int>(pos_shape[1]);
+  const int pos_sequence_length = 2 * sequence_length - 1;
   const int input_hidden_size = static_cast<int>(shape[2]);
-  
+
   int hidden_size;
 
   if (qkv_hidden_sizes_.size() == 0) {
@@ -269,8 +231,8 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
   // gemm_data(BS, NT) = input(BS, D) x weights(D, NT) + bias(NT)
   // D (input_hidden_size) is hidden dimension of input, where D could be larger than any of the hidden_sizes
   // (NH) when model is pruned. T = H1 + H2 + H3, where H1, H2, H3 are head sizes of Q, K, V respectively
-  auto gemm_data = allocator->Alloc(SafeInt<size_t>(batch_size) * 
-    (sequence_length * (q_hidden_size + k_hidden_size + v_hidden_size) + pos_sequence_length * q_hidden_size) * element_size);
+  auto gemm_data = allocator->Alloc(SafeInt<size_t>(batch_size) *
+                                    (sequence_length * (q_hidden_size + k_hidden_size + v_hidden_size) + pos_sequence_length * q_hidden_size) * element_size);
   BufferUniquePtr gemm_buffer(gemm_data, BufferDeleter(allocator));
 
   auto Q = reinterpret_cast<T*>(gemm_data);
@@ -286,8 +248,7 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
     const auto* weights_data = weights ? weights->template Data<T>() : nullptr;
     const auto* bias_data = bias->template Data<T>();
 
-    const double cost =
-        static_cast<double>(sequence_length) * static_cast<double>(head_size) * static_cast<double>(input_hidden_size);
+    const double cost = static_cast<double>(sequence_length) * static_cast<double>(head_size) * static_cast<double>(input_hidden_size);
     ThreadPool::TryParallelFor(tp, loop_len, cost, [&](std::ptrdiff_t begin, std::ptrdiff_t end) {
       for (std::ptrdiff_t i = begin; i != end; ++i) {
         const int batch_index = static_cast<int>((i / 3) / num_heads_);
@@ -320,20 +281,20 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
         // B: weights        (DxNxT)             D x (N.)T            D x H
         // C: QKV[qkv_index] (BxNxSxT)          (B.N.)S x T           S x H
         math::GemmEx<float, ThreadPool>(
-            CblasNoTrans,                                 // TransA = no
-            CblasNoTrans,                                 // TransB = no
-            sequence_length,                              // M      = S
-            head_size,                                    // N      = H
-            input_hidden_size,                            // K      = D
-            1.0f,                                         // alpha
-            input_data + input_offset,                    // A
-            input_hidden_size,                            // lda    = D
-            weights_data + weights_offset,                // B
-            q_hidden_size + k_hidden_size + v_hidden_size,// ldb = NH1 + NH2 + NH3
-            1.0f,                                         // beta
-            qkv_dest + qkv_offset,                        // C
-            head_size,                                    // ldc
-            nullptr                                       // use single-thread
+            CblasNoTrans,                                   // TransA = no
+            CblasNoTrans,                                   // TransB = no
+            sequence_length,                                // M      = S
+            head_size,                                      // N      = H
+            input_hidden_size,                              // K      = D
+            1.0f,                                           // alpha
+            input_data + input_offset,                      // A
+            input_hidden_size,                              // lda    = D
+            weights_data + weights_offset,                  // B
+            q_hidden_size + k_hidden_size + v_hidden_size,  // ldb = NH1 + NH2 + NH3
+            1.0f,                                           // beta
+            qkv_dest + qkv_offset,                          // C
+            head_size,                                      // ldc
+            nullptr                                         // use single-thread
         );
       }
     });
@@ -341,63 +302,56 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
 
   {
     const int loop_len = batch_size * num_heads_;
-    const auto* input_data = pos_emb->template Data<T>();
-    const auto* weights_data = pos_weights->template Data<T>();
-    const auto* bias_data = pos_bias->template Data<T>();
+    const auto* pos_input_data = pos_emb->template Data<T>();
+    const auto* pos_weights_data = pos_weights->template Data<T>();
 
     const double cost =
-        static_cast<double>(pos_sequence_length) * static_cast<double>(head_size) * static_cast<double>(input_hidden_size);
+        static_cast<double>(pos_sequence_length) * static_cast<double>(head_size) * static_cast<double>(q_hidden_size);
     ThreadPool::TryParallelFor(tp, loop_len, cost, [&](std::ptrdiff_t begin, std::ptrdiff_t end) {
       for (std::ptrdiff_t i = begin; i != end; ++i) {
         const int batch_index = static_cast<int>(i / num_heads_);
         const int head_index = static_cast<int>(i % num_heads_);
 
-        int input_offset = batch_index * pos_sequence_length * input_hidden_size;
+        int input_offset = batch_index * pos_sequence_length * q_hidden_size;
 
         int head_size = qkv_head_size[0];
         int weights_offset = 0;
         int bias_offset = head_index * head_size;
         weights_offset = bias_offset;
-
         int p_offset = (batch_index * num_heads_ + head_index) * (pos_sequence_length * head_size);
-
-        // TODO!! memcpy here makes it not worthwhile to use Gemm batch. Possible to post process?
-        // broadcast NH -> (B.N.S.H) for each of Q, K, V
-        const T* broadcast_data_src = bias_data + bias_offset;
+        
         T* broadcast_data_dest = P + p_offset;
-
         for (int seq_index = 0; seq_index < pos_sequence_length; seq_index++) {
-          memcpy(broadcast_data_dest, broadcast_data_src, head_size * sizeof(T));
+          memset(broadcast_data_dest, 0, SafeInt<size_t>(head_size) * sizeof(T));
           broadcast_data_dest += head_size;
         }
-
         //                   original           transposed            iteration
         // A: input          (BxSxD)            (B.)S x D             S x D
         // B: weights        (DxNxT)             D x (N.)T            D x H
         // C: QKV[qkv_index] (BxNxSxT)          (B.N.)S x T           S x H
         math::GemmEx<float, ThreadPool>(
-            CblasNoTrans,                                 // TransA = no
-            CblasNoTrans,                                 // TransB = no
-            pos_sequence_length,                              // M      = S
-            head_size,                                    // N      = H
-            input_hidden_size,                            // K      = D
-            1.0f,                                         // alpha
-            input_data + input_offset,                    // A
-            input_hidden_size,                            // lda    = D
-            weights_data + weights_offset,                // B
-            q_hidden_size,// ldb = NH1
-            1.0f,                                         // beta
-            P + p_offset,                        // C
-            head_size,                                    // ldc
-            nullptr                                       // use single-thread
+            CblasNoTrans,                   // TransA = no
+            CblasNoTrans,                   // TransB = no
+            pos_sequence_length,            // M      = S
+            head_size,                      // N      = H
+            q_hidden_size,              // K      = D
+            1.0f,                           // alpha
+            pos_input_data + input_offset,      // A
+            q_hidden_size,              // lda    = D
+            pos_weights_data + weights_offset,  // B
+            q_hidden_size,                  // ldb = NH1
+            1.0f,                           // beta
+            P + p_offset,                   // C
+            head_size,                      // ldc
+            nullptr                         // use single-thread
         );
       }
     });
   }
   // Compute the attention score and apply the score to V
-  return ApplyRelPosAttention(Q, K, V, P, mask_index, pos_bias_u, pos_bias_v, output,
-                        batch_size, sequence_length, pos_sequence_length,
-                        qkv_head_size[0], qkv_head_size[2], v_hidden_size, context);
+  return ApplyRelPosAttention(Q, K, V, P, pos_bias_u, pos_bias_v, output,
+                              batch_size, sequence_length, pos_sequence_length,
+                              qkv_head_size[0], qkv_head_size[2], v_hidden_size, context);
 }
 }  // namespace contrib
 }  // namespace onnxruntime
