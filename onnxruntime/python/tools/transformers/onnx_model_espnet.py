@@ -38,7 +38,7 @@ class ESPnetOptimizationOptions(FusionOptions):
         super().__init__(model_type)
 
 
-class ESPnetOnnxEncoder(OnnxModel):
+class ESPnetOnnxModel(OnnxModel):
     def __init__(
         self,
         model: ModelProto,
@@ -456,16 +456,3 @@ class ESPnetOnnxEncoder(OnnxModel):
             logger.warning("Attention not fused")
 
         return is_perfect
-
-
-class ESPnetOnnxDecoder(ESPnetOnnxEncoder):
-    def __init__(
-        self,
-        model: ModelProto,
-        num_heads: int = 0,
-        hidden_size: int = 0
-    ):
-        super().__init__(
-            model, num_heads, hidden_size
-        )
-    
