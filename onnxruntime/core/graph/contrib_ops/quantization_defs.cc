@@ -1180,6 +1180,10 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                               OpSchema()
                                   .SetDoc("Quantization of Attention with relative positional embedding.")
                                   .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                  .Attr("legacy",
+                                        "Whether to use Legacy version of relpos attention. Default value is 0.",
+                                        AttributeProto::INT,
+                                        static_cast<int64_t>(0))
                                   .Input(
                                       0, "input",
                                       "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
