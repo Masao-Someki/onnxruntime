@@ -1176,6 +1176,98 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                                   }));
 
 
+  ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(QRelPosAttention, 1,
+                              OpSchema()
+                                  .SetDoc("Quantization of Attention with relative positional embedding.")
+                                  .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                  .Input(
+                                      0, "input",
+                                      "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
+                                      "T1")
+                                  .Input(
+                                      1, "weights",
+                                      "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
+                                      "T2")
+                                  .Input(
+                                      2, "pos_emb",
+                                      "2D input tensor with shape (input_hidden_size, 3 * hidden_size), hidden_size = num_heads * head_size",
+                                      "T1")
+                                  .Input(
+                                      3, "pos_weights",
+                                      "1D input tensor with shape (3 * hidden_size)",
+                                      "T2")
+                                  .Input(
+                                      4, "bias",
+                                      "2D input tensor with shape (input_hidden_size, 3 * hidden_size), hidden_size = num_heads * head_size",
+                                      "T3")
+                                  .Input(
+                                      5, "pos_bias_u",
+                                      "1D input tensor with shape (3 * hidden_size)",
+                                      "T3")
+                                  .Input(
+                                      6, "pos_bias_v",
+                                      "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                      "T3")
+                                  .Input(
+                                      7, "input_scale_tensor",
+                                      "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                      "T3")
+                                  .Input(
+                                      8, "weights_scale_tensor",
+                                      "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                      "Its size should be 3 * hidden_size if it is per-column quantization",
+                                      "T3")
+                                  .Input(
+                                      9, "pos_emb_scale_tensor",
+                                      "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                      "Its size should be 3 * hidden_size if it is per-column quantization",
+                                      "T3")
+                                  .Input(
+                                      10, "pos_weights_scale_tensor",
+                                      "Attention mask index with shape (batch_size)",
+                                      "T3",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      11, "input_zp_tensor",
+                                      "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                      "T1",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      12, "iw_zp_tensor",
+                                      "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                      "Its size should be 3 * hidden_size if it is per-column quantization",
+                                      "T2",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      13, "pos_zp_tensor",
+                                      "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                      "T1",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      14, "pw_zp_tensor",
+                                      "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                      "Its size should be 3 * hidden_size if it is per-column quantization",
+                                      "T2",
+                                      OpSchema::Optional)
+                                  .Output(
+                                      0,
+                                      "output",
+                                      "3D output tensor with shape (batch_size, sequence_length, hidden_size)",
+                                      "T3")
+                                  .TypeConstraint("T1", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
+                                  .TypeConstraint("T2", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
+                                  .TypeConstraint("T3", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float tensors.")
+                                  .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                    // Type inference
+                                    ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+                                    
+                                    // Shape inference
+                                    if (hasInputShape(ctx, 0)) {
+                                      auto& input_shape = getInputShape(ctx, 0);
+                                      updateOutputShape(ctx, 0, input_shape);
+                                    }
+                                  }));
+
   constexpr const char* QEmbedLayerNormalization_ver1_doc = R"DOC(
 QEmbedLayerNormalization is the quantized fusion of embedding layer in BERT model, with optional mask processing.
 The embedding layer takes input_ids (word IDs) and segment_ids (sentence IDs) to look up word_embedding, position_embedding,
