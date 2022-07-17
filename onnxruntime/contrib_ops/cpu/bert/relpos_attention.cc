@@ -172,9 +172,9 @@ template <typename T>
 Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
   const Tensor* input = context->Input<Tensor>(0);
   const Tensor* weights = context->Input<Tensor>(1);
-  const Tensor* bias = context->Input<Tensor>(2);
-  const Tensor* pos_emb = context->Input<Tensor>(3);
-  const Tensor* pos_weights = context->Input<Tensor>(4);
+  const Tensor* pos_emb = context->Input<Tensor>(2);
+  const Tensor* pos_weights = context->Input<Tensor>(3);
+  const Tensor* bias = context->Input<Tensor>(4);
   const Tensor* pos_bias_u = context->Input<Tensor>(5);
   const Tensor* pos_bias_v = context->Input<Tensor>(6);
   ORT_RETURN_IF_ERROR(CheckInputs(input->Shape(),

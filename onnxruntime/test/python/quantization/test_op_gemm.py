@@ -182,6 +182,69 @@ class TestOpGEMM(unittest.TestCase):
 
         onnx.save(model, output_model_path)
         
+    def construct_model_relpos_attention(self, output_model_path):
+        #      (query) (pos_emb)
+        #         |        |
+        #         ----+----
+        #             |
+        #       RelPosAttention
+        #             |
+        #           MatMul
+        #             |
+        #          (output)
+        input_name = 'input'
+        pos_name = 'pos_emb'
+        output_name = 'output'
+        initializers = []
+
+        def make_relpos_attention_node(i_name, p_name, i_weight_shape, p_weight_shape, i_weight_name, p_weight_name,
+                i_bias_shape, i_bias_name, u_bias_shape, u_bias_name, v_bias_shape, v_bias_name, output_name):
+            i_weight_data = np.random.normal(0, 0.1, i_weight_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(i_weight_data, name=i_weight_name))
+            p_weight_data = np.random.normal(0, 0.1, p_weight_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(p_weight_data, name=p_weight_name))
+
+            bias_data = np.random.normal(0, 0.1, i_bias_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(bias_data, name=i_bias_name))
+            u_bias_data = np.random.normal(0, 0.1, u_bias_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(u_bias_data, name=u_bias_name))
+            v_bias_data = np.random.normal(0, 0.1, v_bias_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(v_bias_data, name=v_bias_name))
+
+            return onnx.helper.make_node('RelPosAttention',
+                [i_name, i_weight_name, p_name, p_weight_name, i_bias_name, u_bias_name, v_bias_name], [output_name])
+
+        def make_matmul_node(input_name, weight_shape, weight_name, output_name):
+            weight_data = np.random.normal(0, 0.1, weight_shape).astype(np.float32)
+            initializers.append(onnx.numpy_helper.from_array(weight_data, name=weight_name))
+
+            return onnx.helper.make_node('MatMul', [input_name, weight_name], [output_name])
+        
+        # make cross attention node
+        attention_output_name = "attention_output"
+        relpos_attention_node = make_relpos_attention_node(
+            input_name, pos_name, [10, 30], [10, 10], 'input.weight', 'pos.weight',
+            [30], 'input.bias', [2,5], 'pos_u.bias', [2,5], 'pos_v.bias', attention_output_name)
+        relpos_attention_node.domain = "espnet_onnx"
+        relpos_attention_node.attribute.extend([helper.make_attribute("num_heads", 2)])
+
+        # make matmul node
+        matmul_node = make_matmul_node(attention_output_name, [10, 10], 'matmul.weight', output_name)
+        
+        # make graph
+        input_tensor = helper.make_tensor_value_info(input_name, TensorProto.FLOAT, [1, -1, 10])
+        pos_tensor = helper.make_tensor_value_info(pos_name, TensorProto.FLOAT, [1, -1, 10])
+        output_tensor = helper.make_tensor_value_info(output_name, TensorProto.FLOAT, [1, -1, 10])
+        
+        graph_name = 'relpos_attention_test'
+        graph = helper.make_graph([relpos_attention_node, matmul_node], graph_name,
+                                  [input_tensor, pos_tensor], [output_tensor], initializer=initializers)
+        model = helper.make_model(graph, producer_name='espnet_onnx', opset_imports=[
+            helper.make_opsetid('espnet_onnx', 1), helper.make_opsetid('', 13)])
+        model.ir_version = onnx.IR_VERSION
+
+        onnx.save(model, output_model_path)
+        
     def static_quant_test(self, model_fp32_path, data_reader, activation_type, weight_type, extra_options={}):
         activation_proto_qtype = TensorProto.UINT8 if activation_type == QuantType.QUInt8 else TensorProto.INT8
         activation_type_str = 'u8' if (activation_type == QuantType.QUInt8) else 's8'
@@ -243,6 +306,13 @@ class TestOpGEMM(unittest.TestCase):
         check_model_correctness(self, model_fp32_path, model_int8_path,
                 {'query': np.random.rand(1, 5, 10).astype(np.float32), 'key': np.random.rand(1, 5, 10).astype(np.float32)})
 
+    def dynamic_relpos_attention_quant_test(self, model_fp32_path, model_int8_path, per_channel, reduce_range):
+        quantize_dynamic(model_fp32_path, model_int8_path, per_channel=per_channel, reduce_range=reduce_range)
+        quant_nodes = {'QRelPosAttention': 1, 'MatMulInteger': 1}
+        check_op_type_count(self, model_int8_path, **quant_nodes)
+        check_model_correctness(self, model_fp32_path, model_int8_path,
+                {'input': np.random.rand(1, 5, 10).astype(np.float32), 'pos_emb': np.random.rand(1, 9, 10).astype(np.float32)})
+
     def test_quantize_gemm(self):
         np.random.seed(1)
         model_fp32_path = 'gemm_fp32.onnx'
@@ -289,6 +359,17 @@ class TestOpGEMM(unittest.TestCase):
         self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, True, False)
         self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, False, True)
         self.dynamic_cross_attention_quant_test(model_fp32_path, model_int8_path, False, False)
+
+    def test_quantize_relpos_attention(self):
+        np.random.seed(1)
+        model_fp32_path = 'relpos_attention_fp32.onnx'
+        model_int8_path = 'relpos_attention_fp32.quant.onnx'
+        self.construct_model_relpos_attention(model_fp32_path)
+
+        self.dynamic_relpos_attention_quant_test(model_fp32_path, model_int8_path, True, True)
+        self.dynamic_relpos_attention_quant_test(model_fp32_path, model_int8_path, True, False)
+        self.dynamic_relpos_attention_quant_test(model_fp32_path, model_int8_path, False, True)
+        self.dynamic_relpos_attention_quant_test(model_fp32_path, model_int8_path, False, False)
 
 
 if __name__ == '__main__':

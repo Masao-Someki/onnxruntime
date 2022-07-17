@@ -5,6 +5,7 @@ from .operators.qdq_base_operator import QDQOperatorBase
 from .operators.matmul import MatMulInteger, QLinearMatMul, QDQMatMul
 from .operators.attention import AttentionQuant
 from .operators.cross_attention import CrossAttentionQuant
+from .operators.relpos_attention import RelPosAttentionQuant
 from .operators.embed_layernorm import EmbedLayerNormalizationQuant
 from .operators.gather import GatherQuant
 from .operators.conv import QLinearConv, ConvInteger, QDQConv
@@ -32,6 +33,7 @@ IntegerOpsRegistry = {
     "MatMul": MatMulInteger,
     "Attention": AttentionQuant,
     "CrossAttention": CrossAttentionQuant,
+    "RelPosAttention": RelPosAttentionQuant,
     "LSTM": LSTMQuant,
 }
 IntegerOpsRegistry.update(CommonOpsRegistry)

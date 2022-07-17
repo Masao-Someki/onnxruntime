@@ -57,9 +57,9 @@ static void RunRelPosAttentionTest(
 
     tester.AddInput<float>("input", input_dims, input_data);
     tester.AddInput<float>("weights", weights_dims, weights_data);
-    tester.AddInput<float>("bias", bias_dims, bias_data);
     tester.AddInput<float>("pos_emb", pos_emb_dims, pos_emb);
     tester.AddInput<float>("pos_weights", pos_weights_dims, pos_weights);
+    tester.AddInput<float>("bias", bias_dims, bias_data);
     tester.AddInput<float>("pos_bias_u", pos_bias_u_dims, pos_bias_u);
     tester.AddInput<float>("pos_bias_v", pos_bias_v_dims, pos_bias_v);
 

@@ -21,7 +21,7 @@ class RelPosAttentionQuant(QuantOperatorBase):
         assert (node.op_type == "RelPosAttention")
 
         (quantized_input_names, zero_point_names, scale_names, nodes) = \
-            self.quantizer.quantize_inputs(node, [0, 1, 3, 4] ,reduce_range=True, op_level_per_channel=True)
+            self.quantizer.quantize_inputs(node, [0, 1, 2, 3] ,reduce_range=True, op_level_per_channel=True)
         if quantized_input_names is None:
             return super().quantize()
 
