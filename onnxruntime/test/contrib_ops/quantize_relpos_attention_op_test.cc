@@ -47,12 +47,16 @@ void RunQRelPosAttention(const std::vector<float>& input,
                    int pos_sequence_length,
                    int hidden_size,
                    int number_of_heads,
+                   bool is_legacy = false,
                    bool use_float16 = false,
                    int input_hidden_size = 0) {
   input_hidden_size = (input_hidden_size == 0) ? hidden_size : input_hidden_size;
 
   OpTester tester("QRelPosAttention", 1, onnxruntime::kENDomain);
   tester.AddAttribute<int64_t>("num_heads", static_cast<int64_t>(number_of_heads));
+  if (is_legacy) {
+    tester.AddAttribute<int64_t>("legacy", static_cast<int64_t>(is_legacy ? 1 : 0));
+  }
 
   std::vector<int64_t> i_input_dims = {batch_size, sequence_length, input_hidden_size};
   std::vector<int64_t> pos_input_dims = {batch_size, pos_sequence_length, input_hidden_size};
@@ -154,6 +158,7 @@ static void RunQRelPosAttentionDNNL(
     int pos_sequence_length,
     int hidden_size,
     int number_of_heads,
+    bool is_legacy,
     bool use_special_quantize_parameter = true) {
   // Return without running code if USE_DNNL is not defined
 #ifdef USE_DNNL
@@ -175,7 +180,7 @@ static void RunQRelPosAttentionDNNL(
   RunQRelPosAttention<uint8_t, int8_t, EP::DNNL>(
       input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
       input_quant_params, iw_quant_params, pos_quant_params, pw_quant_params,
-      batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+      batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 #else
   ORT_UNUSED_PARAMETER(input);
   ORT_UNUSED_PARAMETER(weight);
@@ -208,6 +213,7 @@ static void RunQRelPosAttentionU8U8(
     int pos_sequence_length,
     int hidden_size,
     int number_of_heads,
+    bool is_legacy,
     bool use_special_quantize_parameter = true) {
   quantization::Params<uint8_t> input_quant_params = {0.0f, 0};
   quantization::Params<uint8_t> pos_quant_params = {0.0f, 0};
@@ -228,7 +234,7 @@ static void RunQRelPosAttentionU8U8(
   RunQRelPosAttention<uint8_t, uint8_t, EP::CPU>(
       input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
       input_quant_params, iw_quant_params, pos_quant_params, pw_quant_params,
-      batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+      batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 static void RunQRelPosAttentionU8S8(
@@ -245,6 +251,7 @@ static void RunQRelPosAttentionU8S8(
     int pos_sequence_length,
     int hidden_size,
     int number_of_heads,
+    bool is_legacy,
     bool use_special_quantize_parameter = true) {
   quantization::Params<uint8_t> input_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
   quantization::Params<uint8_t> pos_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
@@ -264,7 +271,7 @@ static void RunQRelPosAttentionU8S8(
   RunQRelPosAttention<uint8_t, int8_t, EP::CPU>(
       input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
       input_quant_params, iw_quant_params, pos_quant_params, pw_quant_params,
-      batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+      batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 static void RunQRelPosAttentionAll(
@@ -281,16 +288,17 @@ static void RunQRelPosAttentionAll(
     int pos_sequence_length,
     int hidden_size,
     int number_of_heads,
+    bool is_legacy,
     bool use_special_quantize_parameter = true) {
   RunQRelPosAttentionU8U8(
       input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
-                batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+                batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
   RunQRelPosAttentionU8S8(
       input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
-                batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+                batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
   RunQRelPosAttentionDNNL(
       input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
-                batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+                batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 //ONEDNN EP only supports 2D raw mask
@@ -394,6 +402,7 @@ TEST(QRelPosAttentionTest, QRelPosAttentionBatch1) {
   int pos_sequence_length = 2 * sequence_length - 1;
   int hidden_size = 8;
   int number_of_heads = 2;
+  bool is_legacy = false;
 
   std::vector<float> input_data = {
       0.8f, -0.5f, 0.0f, 1.f, 0.8f, -0.5f, 0.0f, 1.f,
@@ -476,7 +485,7 @@ TEST(QRelPosAttentionTest, QRelPosAttentionBatch1) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 TEST(QRelPosAttentionTest, QRelPosttentionBatch2) {
@@ -485,6 +494,7 @@ TEST(QRelPosAttentionTest, QRelPosttentionBatch2) {
   int pos_sequence_length = 2 * sequence_length - 1;
   int hidden_size = 8;
   int number_of_heads = 2;
+  bool is_legacy = false;
 
   std::vector<float> input_data = {
       0.8f, -0.5f, 0.0f, 1.0f, 0.8f, -0.5f, 0.0f, 1.0f,
@@ -584,7 +594,202 @@ TEST(QRelPosAttentionTest, QRelPosttentionBatch2) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
+}
+
+TEST(QRelPosAttentionTest, QLegacyRelPosAttentionBatch1) {
+  int batch_size = 1;
+  int sequence_length = 3;
+  int pos_sequence_length = sequence_length;
+  int hidden_size = 8;
+  int number_of_heads = 2;
+  bool is_legacy = true;
+
+  std::vector<float> input_data = {
+      0.8f, -0.5f, 0.0f, 1.f, 0.8f, -0.5f, 0.0f, 1.f,
+      0.5f, 0.2f, 0.3f, -0.6f, 0.5f, 0.2f, 0.3f, -0.6f,
+      0.8f, -0.5f, 0.0f, 1.f, 0.8f, -0.5f, 0.0f, 1.0f};
+
+  std::vector<float> pos_emb = {
+      0.2f, -0.0f, 0.2f, 0.4f, 0.2f, -0.0f, 0.2f, 0.4f,
+      -0.7f, 1.0f, -0.3f, -0.5f, -0.7f, 1.0f, -0.3f, -0.5f,
+      -1.3f, 1.0f, -0.5f, 1.0f, -1.3f, 1.0f, -0.5f, 1.0f};
+
+  std::vector<float> weight_data = {
+      0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
+      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
+
+      0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      0.9f, 0.1f, -1.3f, 0.7f, 0.9f, 0.1f, -1.3f, 0.7f,
+
+      0.3f, 0.2f, 4.0f, 2.2f, 0.3f, 0.2f, 4.0f, 2.2f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      0.4f, 1.0f, 1.2f, 0.5f, 0.4f, 1.0f, 1.2f, 0.5f,
+
+      0.2f, 0.1f, 0.4f, 1.6f, 0.2f, 0.1f, 0.4f, 1.6f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
+      8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
+
+      0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
+
+      0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      0.9f, 0.1f, -1.3f, 0.7f, 0.9f, 0.1f, -1.3f, 0.7f,
+
+      0.3f, 0.2f, 4.0f, 2.2f, 0.3f, 0.2f, 4.0f, 2.2f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      0.4f, 1.0f, 1.2f, 0.5f, 0.4f, 1.0f, 1.2f, 0.5f,
+
+      0.2f, 0.1f, 0.4f, 1.6f, 0.2f, 0.1f, 0.4f, 1.6f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
+      8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
+      };
+
+  std::vector<float> pos_weight_data = {
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f};
+
+  std::vector<float> bias_data = {
+    -0.5f, 0.6f, 1.2f, 2.1f, -0.5f, 0.6f, 1.2f, 2.1f,
+    0.5f, 0.7f, 0.2f, 1.2f, 0.5f, 0.7f, 0.2f, 1.2f,
+    0.5f, 0.4f, 0.3f, 1.2f, 0.5f, 0.4f, 0.3f, 1.2f
+  };
+
+  std::vector<float> pos_bias_u = {
+      0.3f, -0.6f, 0.3f, -0.6f,
+      0.9f, 0.1f, 0.9f, 0.1f};
+
+  std::vector<float> pos_bias_v = {
+      1.2f, 0.5f, 1.2f, 0.5f,
+      8.4f, 0.0f, 8.4f, 0.0f};
+
+  std::vector<float> output_data = {
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+
+      -6.4679698944091797f, 0.3448030948638916f, 0.2346523106098175f, 0.8192735314369202f,
+      -8.6457786560058594f, 0.4385272860527039f, -0.5083251595497131f, -0.0463974177837372f,
+
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
+
+  RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
+    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
+}
+
+TEST(QRelPosAttentionTest, QLegacyRelPosttentionBatch2) {
+  int batch_size = 2;
+  int sequence_length = 3;
+  int pos_sequence_length = sequence_length;
+  int hidden_size = 8;
+  int number_of_heads = 2;
+  bool is_legacy = true;
+
+  std::vector<float> input_data = {
+      0.8f, -0.5f, 0.0f, 1.0f, 0.8f, -0.5f, 0.0f, 1.0f,
+      0.5f, 0.2f, 0.3f, -0.6f, 0.5f, 0.2f, 0.3f, -0.6f,
+      0.8f, -0.5f, 0.0f, 1.f, 0.8f, -0.5f, 0.0f, 1.0f,
+      0.8f, -0.5f, 0.0f, 1.f, 0.8f, -0.5f, 0.0f, 1.0f,
+      0.5f, 0.2f, 0.3f, -0.6f, 0.5f, 0.2f, 0.3f, -0.6f,
+      0.8f, -0.5f, 0.0f, 1.0f, 0.8f, -0.5f, 0.0f, 1.0f};
+
+  std::vector<float> pos_emb = {
+      0.2f, -0.0f, 0.2f, 0.4f, 0.2f, -0.0f, 0.2f, 0.4f,
+      -0.7f, 1.0f, -0.3f, -0.5f, -0.7f, 1.0f, -0.3f, -0.5f,
+      -1.3f, 1.0f, -0.5f, 1.0f, -1.3f, 1.0f, -0.5f, 1.0f,
+      0.2f, -0.0f, 0.2f, 0.4f, 0.2f, -0.0f, 0.2f, 0.4f,
+      -0.7f, 1.0f, -0.3f, -0.5f, -0.7f, 1.0f, -0.3f, -0.5f,
+      -1.3f, 1.0f, -0.5f, 1.0f, -1.3f, 1.0f, -0.5f, 1.0f};
+
+  std::vector<float> weight_data = {
+      0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
+      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
+
+      0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      0.9f, 0.1f, -1.3f, 0.7f, 0.9f, 0.1f, -1.3f, 0.7f,
+
+      0.3f, 0.2f, 4.0f, 2.2f, 0.3f, 0.2f, 4.0f, 2.2f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      0.4f, 1.0f, 1.2f, 0.5f, 0.4f, 1.0f, 1.2f, 0.5f,
+
+      0.2f, 0.1f, 0.4f, 1.6f, 0.2f, 0.1f, 0.4f, 1.6f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
+      8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
+
+      0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
+
+      0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      0.9f, 0.1f, -1.3f, 0.7f, 0.9f, 0.1f, -1.3f, 0.7f,
+
+      0.3f, 0.2f, 4.0f, 2.2f, 0.3f, 0.2f, 4.0f, 2.2f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      0.4f, 1.0f, 1.2f, 0.5f, 0.4f, 1.0f, 1.2f, 0.5f,
+
+      0.2f, 0.1f, 0.4f, 1.6f, 0.2f, 0.1f, 0.4f, 1.6f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
+      8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
+      };
+
+  std::vector<float> pos_weight_data = {
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
+      1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
+      2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f};
+
+  std::vector<float> bias_data = {
+    -0.5f, 0.6f, 1.2f, 2.1f, -0.5f, 0.6f, 1.2f, 2.1f,
+    0.5f, 0.7f, 0.2f, 1.2f, 0.5f, 0.7f, 0.2f, 1.2f,
+    0.5f, 0.4f, 0.3f, 1.2f, 0.5f, 0.4f, 0.3f, 1.2f
+  };
+
+  std::vector<float> pos_bias_u = {
+      0.3f, -0.6f, 0.3f, -0.6f,
+      0.9f, 0.1f, 0.9f, 0.1f};
+
+  std::vector<float> pos_bias_v = {
+      1.2f, 0.5f, 1.2f, 0.5f,
+      8.4f, 0.0f, 8.4f, 0.0f};
+
+  std::vector<float> output_data = {
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+
+      -6.4679698944091797f, 0.3448030948638916f, 0.2346523106098175f, 0.8192735314369202f,
+      -8.6457786560058594f, 0.4385272860527039f, -0.5083251595497131f, -0.0463974177837372f,
+
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+
+      -6.4679698944091797f, 0.3448030948638916f, 0.2346523106098175f, 0.8192735314369202f,
+      -8.6457786560058594f, 0.4385272860527039f, -0.5083251595497131f, -0.0463974177837372f,
+
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
+      16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
+
+  RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
+    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 }  // namespace test

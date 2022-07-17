@@ -141,10 +141,18 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
     return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT,
                            "Input 'pos_emb' should be 3 dimensional tensor.");
   }
+
   int pos_length = static_cast<int>(pos_dims[1]);
-  if (pos_length != 2 * sequence_length - 1) {
-    return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT,
-                           "The length of input 'pos_emb' should be 2 * sequence_length - 1");
+  if (is_legacy_) {
+    if (pos_length != sequence_length) {
+      return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT,
+                            "The length of input 'pos_emb' should be sequence_length in legacy version.");
+    }
+  } else {
+    if (pos_length != 2 * sequence_length - 1) {
+      return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT,
+                            "The length of input 'pos_emb' should be 2 * sequence_length - 1.");
+    }
   }
 
   return Status::OK();
@@ -185,9 +193,10 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
                                   pos_bias_v->Shape()));
 
   const auto shape = input->Shape().GetDims();
+  const auto pos_shape = pos_emb->Shape().GetDims();
   const int batch_size = static_cast<int>(shape[0]);
   const int sequence_length = static_cast<int>(shape[1]);
-  const int pos_sequence_length = 2 * sequence_length - 1;
+  const int pos_sequence_length = pos_shape[1];
   const int input_hidden_size = static_cast<int>(shape[2]);
 
   int hidden_size;

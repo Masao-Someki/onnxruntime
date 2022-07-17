@@ -27,6 +27,8 @@ class RelPosAttentionBase {
     ORT_ENFORCE(info.GetAttr("num_heads", &num_heads).IsOK() && num_heads > 0);
     num_heads_ = static_cast<int>(num_heads);
 
+    is_legacy_ = info.GetAttrOrDefault<int64_t>("legacy", 0) == 1;
+
     if (!info.GetAttrs<int64_t>("qkv_hidden_sizes", qkv_hidden_sizes_).IsOK() || qkv_hidden_sizes_.empty()) {
       qkv_hidden_sizes_.resize(0);
     }
@@ -40,6 +42,7 @@ class RelPosAttentionBase {
                       const TensorShape& pos_bias_v_shape) const;
 
   int num_heads_;
+  bool is_legacy_;
   std::vector<int64_t> qkv_hidden_sizes_;   // Q, K, V path hidden layer sizes
 };
 

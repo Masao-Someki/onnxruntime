@@ -259,6 +259,10 @@ ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(RelPosAttention, 1,
                                 .SetDoc(RelPos_Attention_doc)
                                 .SinceVersion(1)
                                 .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                .Attr("legacy",
+                                      "Flag to check if the attention is legacy version. Default value is 0, = latest version.",
+                                      AttributeProto::INT,
+                                      static_cast<int64_t>(0))
                                 .Attr("qkv_hidden_sizes",
                                       "Hidden layer sizes of Q, K, V paths in Attention",
                                       AttributeProto::INTS,
