@@ -26,6 +26,7 @@ from onnx import GraphProto, ModelProto, TensorProto, ValueInfoProto, helper
 
 from fusion_attention import AttentionMask, FusionAttention
 from fusion_cross_attention import FusionCrossAttention
+from fusion_relpos_attention import FusionRelPosAttention
 
 logger = getLogger(__name__)
 
@@ -70,11 +71,18 @@ class ESPnetOnnxModel(OnnxModel):
             self.num_heads,
             self.attention_mask
         )
+        self.relpos_attention_fusion = FusionRelPosAttention(
+            self,
+            self.hidden_size,
+            self.num_heads,
+            self.attention_mask
+        )
         self.utils = FusionUtils(self)
 
     def fuse_attention(self):
         self.attention_fusion.apply()
         self.cross_attention_fusion.apply()
+        self.relpos_attention_fusion.apply()
 
     def fuse_gelu(self):
         fusion = FusionGelu(self)
