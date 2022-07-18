@@ -10,6 +10,14 @@
 
 namespace onnxruntime {
 namespace test {
+enum MaskIndexType {
+  kMaskIndexEnd = 0,
+  kMaskIndexEndAndStart,
+  kMaskRaw,
+  kMask3D,
+  kMaskDummy,  // Dummy mask with shape [1, 1] or [batch_size, 1]
+  kMask4D      // Megatron GPT2 mask with shape [batch_size, 1, max_sequence_length, max_sequence_length]
+};
 
 static void RunRelPosAttentionTest(
     const std::vector<float>& input_data,
@@ -19,6 +27,7 @@ static void RunRelPosAttentionTest(
     const std::vector<float>& pos_weights,
     const std::vector<float>& pos_bias_u,
     const std::vector<float>& pos_bias_v,
+    const std::vector<int32_t>& mask_index_data,
     const std::vector<float>& output_data,
     int batch_size,
     int sequence_length,
@@ -28,6 +37,7 @@ static void RunRelPosAttentionTest(
     int head_size,
     bool is_legacy = false,
     const std::vector<int32_t> qkv_sizes = {},
+    MaskIndexType mask_index_type = kMaskIndexEnd,
     bool only_enable_cpu = false,
     bool only_enable_cuda = false,
     bool use_float16 = false) {
@@ -58,6 +68,32 @@ static void RunRelPosAttentionTest(
     std::vector<int64_t> pos_bias_u_dims = {num_heads, head_size};
     std::vector<int64_t> pos_bias_v_dims = {num_heads, head_size};
 
+    std::vector<int64_t> mask_index_dims_1 = {batch_size};
+    std::vector<int64_t> mask_index_dims_2 = {2 * batch_size};
+    std::vector<int64_t> mask_index_dims_3 = {batch_size, pos_sequence_length};
+    std::vector<int64_t> mask_index_dims_4 = {batch_size, 1};
+    std::vector<int64_t> mask_index_dims_5 = {batch_size, sequence_length, pos_sequence_length};
+    std::vector<int64_t> mask_index_dims;
+    switch (mask_index_type) {
+      case kMaskIndexEnd:
+        mask_index_dims = mask_index_dims_1;
+        break;
+      case kMaskIndexEndAndStart:
+        mask_index_dims = mask_index_dims_2;
+        break;
+      case kMaskRaw:
+        mask_index_dims = mask_index_dims_3;
+        break;
+      case kMaskDummy:
+        mask_index_dims = mask_index_dims_4;
+        break;
+      case kMask3D:
+        mask_index_dims = mask_index_dims_5;
+        break;
+      default:
+        assert(0);  // shall not reach here.
+        break;
+    }
     const std::vector<int64_t> output_dims = {batch_size, sequence_length, hidden_size};
 
     tester.AddInput<float>("input", input_dims, input_data);
@@ -67,6 +103,12 @@ static void RunRelPosAttentionTest(
     tester.AddInput<float>("bias", bias_dims, bias_data);
     tester.AddInput<float>("pos_bias_u", pos_bias_u_dims, pos_bias_u);
     tester.AddInput<float>("pos_bias_v", pos_bias_v_dims, pos_bias_v);
+
+    if (mask_index_data.size() > 0) {  // mask index is optional.
+      tester.AddInput<int32_t>("mask_index", mask_index_dims, mask_index_data);
+    } else {
+      tester.AddOptionalInputEdge<int32_t>();
+    }
 
     tester.AddOutput<float>("output", output_dims, output_data);
 
@@ -169,6 +211,9 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch1) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  // Test mask_index < sequence_length
+  std::vector<int32_t> mask_index_data = {3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -181,7 +226,7 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch1) {
 
   // self-attn without cacheint batch_size,
   RunRelPosAttentionTest(input_data, weight_data, bias_data, pos_emb, pos_weight_data,
-                         pos_bias_u, pos_bias_v, output_data,
+                         pos_bias_u, pos_bias_v, mask_index_data, output_data,
                          batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, head_size, is_legacy);
 }
 
@@ -272,6 +317,9 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch2) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  // Test mask_index < sequence_length
+  std::vector<int32_t> mask_index_data = {3L, 3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -293,7 +341,7 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch2) {
 
   // self-attn without cacheint batch_size,
   RunRelPosAttentionTest(input_data, weight_data, bias_data, pos_emb, pos_weight_data,
-                         pos_bias_u, pos_bias_v, output_data,
+                         pos_bias_u, pos_bias_v, mask_index_data, output_data,
                          batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, head_size, is_legacy);
 }
 
@@ -374,6 +422,9 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch1) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  // Test mask_index < sequence_length
+  std::vector<int32_t> mask_index_data = {3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -386,7 +437,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch1) {
 
   // self-attn without cacheint batch_size,
   RunRelPosAttentionTest(input_data, weight_data, bias_data, pos_emb, pos_weight_data,
-                         pos_bias_u, pos_bias_v, output_data,
+                         pos_bias_u, pos_bias_v, mask_index_data, output_data,
                          batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, head_size, is_legacy);
 }
 
@@ -473,6 +524,9 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch2) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  // Test mask_index < sequence_length
+  std::vector<int32_t> mask_index_data = {3L, 3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -494,7 +548,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch2) {
 
   // self-attn without cacheint batch_size,
   RunRelPosAttentionTest(input_data, weight_data, bias_data, pos_emb, pos_weight_data,
-                         pos_bias_u, pos_bias_v, output_data,
+                         pos_bias_u, pos_bias_v, mask_index_data, output_data,
                          batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, head_size, is_legacy);
 }
 

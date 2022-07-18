@@ -29,6 +29,7 @@ namespace onnxruntime
                                   const T* P,               // V value with size BxNxSxH
                                   const Tensor* pos_bias_u, // V value with size BxNxSxH
                                   const Tensor* pos_bias_v, // V value with size BxNxSxH
+                                  const Tensor* mask_index,    // mask index. nullptr if no mask or its size is B
                                   Tensor* output,           // output tensor
                                   int batch_size,           // batch size
                                   int sequence_length,      // sequence length
@@ -70,11 +71,24 @@ namespace onnxruntime
                                  qk_head_size, tp);
 
         // III Compute RelShift.
+        void* mask_data = nullptr;
+        if (mask_index != nullptr) {
+          size_t mask_data_bytes = SafeInt<size_t>(batch_size) * sequence_length * pos_sequence_length * sizeof(T);
+          mask_data = allocator->Alloc(mask_data_bytes);
+          memset(mask_data, 0, mask_data_bytes);
+        }
+        BufferUniquePtr mask_data_buffer(mask_data, BufferDeleter(allocator));
+
+        const int32_t* mask_index_data = mask_index != nullptr ? mask_index->template Data<int32_t>() : nullptr;
+        gsl::span<const int64_t> mask_index_dims = mask_index != nullptr ? mask_index->Shape().GetDims() : gsl::span<const int64_t>{};
+
         if (is_legacy_) {
           ComputeLegacyRelShift<T>(static_cast<T*>(matrix_ac), static_cast<T*>(matrix_bd),
+                            mask_index_data, mask_index_dims, static_cast<T*>(mask_data),
                             batch_size, sequence_length, pos_sequence_length, v_head_size, tp);
         } else {
           ComputeRelShift<T>(static_cast<T*>(matrix_ac), static_cast<T*>(matrix_bd),
+                            mask_index_data, mask_index_dims, static_cast<T*>(mask_data),
                             batch_size, sequence_length, pos_sequence_length, v_head_size, tp);
         }
 
@@ -154,6 +168,9 @@ namespace onnxruntime
       void ComputeLegacyRelShift(
                            T* matrix_ac,                             // output buffer for the attention probs. Its size is BxNxSxS*
                            T* matrix_bd,                       // Q data. Its size is BxNxSxH
+                           const int32_t* mask_index,                    // mask index. nullptr if no mask or its size is B
+                           gsl::span<const int64_t> mask_index_dims,     // mask index shape
+                           T* mask_data,                                 // buffer for mask data. It is nullptr if mask_index is nullptr and not unidirectional, otherwise its shape is BxSxS*
                            int batch_size,                           // batch size of self-attention
                            int sequence_length,                      // sequence length
                            int pos_sequence_length,                  // sequence length
@@ -161,6 +178,9 @@ namespace onnxruntime
                            ThreadPool* tp                            // thread pool)
       ) const
       {
+        if (mask_data != nullptr) {
+          PrepareMask(mask_index, mask_index_dims, mask_data, false, batch_size, sequence_length, 0);
+        }
         {
           const int loop_len = batch_size * num_heads_;
           const float alpha = 1.0f / sqrt(static_cast<float>(head_size));
@@ -170,12 +190,14 @@ namespace onnxruntime
           ThreadPool::TryParallelFor(tp, loop_len, cost, [&](std::ptrdiff_t begin, std::ptrdiff_t end){
             for (std::ptrdiff_t i = begin; i != end; ++i) {
               const int output_offset = static_cast<int>(i) * sequence_length * sequence_length;
+              const int batch_index = static_cast<int>(i) / num_heads_;
+              const int mask_offset = batch_index * sequence_length * sequence_length;
               int bd_batch_offset = 0;
               int bd_sequence_offset = sequence_length - 1;
 
               for (int seq_index = 0; seq_index < sequence_length; seq_index++) {
                 const int oidx = static_cast<int>(seq_index) * sequence_length + output_offset;
-                // const int ibd = static_cast<int>(bd_input_offset) + bd_length_offset;
+                const int midx = static_cast<int>(seq_index) * sequence_length + mask_offset;
                 for (int j = 0; j < sequence_length; j++) {
                   if (bd_sequence_offset == sequence_length) {
                     matrix_ac[oidx + j] *= alpha;
@@ -186,6 +208,9 @@ namespace onnxruntime
                     matrix_ac[oidx + j] += matrix_bd[bid];
                     matrix_ac[oidx + j] *= alpha;
                     bd_sequence_offset += 1;
+                  }
+                  if (mask_data != nullptr) {
+                    matrix_ac[oidx + j] += mask_data[midx + j];
                   }
                 }
               }
@@ -204,6 +229,9 @@ namespace onnxruntime
       void ComputeRelShift(
                            T* matrix_ac,                             // output buffer for the attention probs. Its size is BxNxSxS*
                            T* matrix_bd,                       // Q data. Its size is BxNxSxH
+                           const int32_t* mask_index,                    // mask index. nullptr if no mask or its size is B
+                           gsl::span<const int64_t> mask_index_dims,     // mask index shape
+                           T* mask_data,                                 // buffer for mask data. It is nullptr if mask_index is nullptr and not unidirectional, otherwise its shape is BxSxS*
                            int batch_size,                           // batch size of self-attention
                            int sequence_length,                      // sequence length
                            int pos_sequence_length,                  // sequence length
@@ -211,6 +239,9 @@ namespace onnxruntime
                            ThreadPool* tp                            // thread pool)
       ) const
       {
+        if (mask_data != nullptr) {
+          PrepareMask(mask_index, mask_index_dims, mask_data, false, batch_size, sequence_length, 0);
+        }
         const int diff_pos_length = sequence_length - 1; // 2 * seq_len - 1 - seq_len = seq_len - 1
         {
 
@@ -222,14 +253,20 @@ namespace onnxruntime
           ThreadPool::TryParallelFor(tp, loop_len, cost, [&](std::ptrdiff_t begin, std::ptrdiff_t end){
             for (std::ptrdiff_t i = begin; i != end; ++i) {
               const int output_offset = static_cast<int>(i) * sequence_length * sequence_length;
+              const int batch_index = static_cast<int>(i) / num_heads_;
+              const int mask_offset = batch_index * sequence_length * sequence_length;
               int bd_input_offset = sequence_length * pos_sequence_length * static_cast<int>(i); 
 
               for (int seq_index = 0; seq_index < sequence_length; seq_index++) {
                 const int oidx = static_cast<int>(seq_index) * sequence_length + output_offset;
+                const int midx = static_cast<int>(seq_index) * sequence_length + mask_offset;
                 const int ibd = static_cast<int>(bd_input_offset) + seq_index * pos_sequence_length + (diff_pos_length - seq_index);
                 for (int j = 0; j < sequence_length; j++) {
                   matrix_ac[oidx + j] += matrix_bd[ibd + j];
                   matrix_ac[oidx + j] *= alpha;
+                  if (mask_data != nullptr) {
+                    matrix_ac[oidx + j] += mask_data[midx + j];
+                  }
                 }
               }
             }

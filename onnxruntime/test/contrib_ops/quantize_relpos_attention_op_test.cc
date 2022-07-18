@@ -37,6 +37,7 @@ void RunQRelPosAttention(const std::vector<float>& input,
                    const std::vector<float>& bias,
                    const std::vector<float>& pos_bias_u,
                    const std::vector<float>& pos_bias_v,
+                   const std::vector<int32_t>& mask_index_data,
                    const std::vector<float>& output_data,
                    quantization::Params<QInput>& input_quant_params,
                    quantization::Params<QWeight>& weights_quant_params,
@@ -65,8 +66,14 @@ void RunQRelPosAttention(const std::vector<float>& input,
   std::vector<int64_t> bias_dims = {static_cast<int64_t>(3 * hidden_size)};
   std::vector<int64_t> bias_u_dims = {number_of_heads, static_cast<int64_t>(hidden_size / number_of_heads)};
   std::vector<int64_t> bias_v_dims = {number_of_heads, static_cast<int64_t>(hidden_size / number_of_heads)};
+  std::vector<int64_t> mask_index_dims = {batch_size};
   std::vector<int64_t> output_dims = {batch_size, sequence_length, hidden_size};
-
+  if constexpr (ep == EP::DNNL) {
+    //onednn only supports raw mask
+    if (mask_index_data.size() == static_cast<size_t>(batch_size * sequence_length)) {
+      mask_index_dims = {batch_size, sequence_length};
+    }
+  }
   if (input_quant_params.scale != 0.0f) {
     tester.AddInput<QInput>("input",
                             i_input_dims,
@@ -122,7 +129,12 @@ void RunQRelPosAttention(const std::vector<float>& input,
     tester.AddInput<float>("pos_weights_scale_tensor", {1}, {pos_weights_quant_params.scale});
     tester.AddOutput<float>("output", output_dims, output_data);
   }
-
+  if (mask_index_data.size() > 0) {
+    tester.AddInput<int32_t>("mask_index", mask_index_dims, mask_index_data);
+  } else {
+    // mask index is optional.
+    tester.AddOptionalInputEdge<int32_t>();
+  }
   tester.AddInput<QInput>("input_zero_point", {1}, {input_quant_params.zero_point});
   tester.AddInput<QWeight>("iw_zero_point", {1}, {weights_quant_params.zero_point});
   tester.AddInput<QInput>("pos_zero_point", {1}, {pos_emb_quant_params.zero_point});
@@ -152,6 +164,7 @@ static void RunQRelPosAttentionDNNL(
     const std::vector<float>& bias,
     const std::vector<float>& bias_u,
     const std::vector<float>& bias_v,
+    const std::vector<int32_t>& mask_index_data,  // onednn only support raw mask data
     const std::vector<float>& output_data,
     int batch_size,
     int sequence_length,
@@ -178,7 +191,7 @@ static void RunQRelPosAttentionDNNL(
   }
 
   RunQRelPosAttention<uint8_t, int8_t, EP::DNNL>(
-      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
+      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v,mask_index_data,  output_data,
       input_quant_params, iw_quant_params, pos_quant_params, pw_quant_params,
       batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 #else
@@ -189,6 +202,7 @@ static void RunQRelPosAttentionDNNL(
   ORT_UNUSED_PARAMETER(bias);
   ORT_UNUSED_PARAMETER(bias_u);
   ORT_UNUSED_PARAMETER(bias_v);
+  ORT_UNUSED_PARAMETER(mask_index_data);
   ORT_UNUSED_PARAMETER(output_data);
   ORT_UNUSED_PARAMETER(batch_size);
   ORT_UNUSED_PARAMETER(sequence_length);
@@ -207,6 +221,7 @@ static void RunQRelPosAttentionU8U8(
     const std::vector<float>& bias,
     const std::vector<float>& bias_u,
     const std::vector<float>& bias_v,
+    const std::vector<int32_t>& mask_index_data,
     const std::vector<float>& output_data,
     int batch_size,
     int sequence_length,
@@ -232,7 +247,7 @@ static void RunQRelPosAttentionU8U8(
   }
 
   RunQRelPosAttention<uint8_t, uint8_t, EP::CPU>(
-      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
+      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, mask_index_data, output_data,
       input_quant_params, iw_quant_params, pos_quant_params, pw_quant_params,
       batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
@@ -245,6 +260,7 @@ static void RunQRelPosAttentionU8S8(
     const std::vector<float>& bias,
     const std::vector<float>& bias_u,
     const std::vector<float>& bias_v,
+    const std::vector<int32_t>& mask_index_data,
     const std::vector<float>& output_data,
     int batch_size,
     int sequence_length,
@@ -269,7 +285,7 @@ static void RunQRelPosAttentionU8S8(
   }
 
   RunQRelPosAttention<uint8_t, int8_t, EP::CPU>(
-      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
+      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, mask_index_data, output_data,
       input_quant_params, iw_quant_params, pos_quant_params, pw_quant_params,
       batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
@@ -282,6 +298,7 @@ static void RunQRelPosAttentionAll(
     const std::vector<float>& bias,
     const std::vector<float>& bias_u,
     const std::vector<float>& bias_v,
+    const std::vector<int32_t>& mask_index_data,
     const std::vector<float>& output_data,
     int batch_size,
     int sequence_length,
@@ -291,13 +308,13 @@ static void RunQRelPosAttentionAll(
     bool is_legacy,
     bool use_special_quantize_parameter = true) {
   RunQRelPosAttentionU8U8(
-      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
+      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, mask_index_data, output_data,
                 batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
   RunQRelPosAttentionU8S8(
-      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
+      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, mask_index_data, output_data,
                 batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
   RunQRelPosAttentionDNNL(
-      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, output_data,
+      input, weight, pos_emb, pos_weights, bias, bias_u, bias_v, mask_index_data, output_data,
                 batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
@@ -381,6 +398,8 @@ TEST(QRelPosAttentionTest, QRelPosAttentionDNNLBatch1) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  std::vector<int32_t> mask_index_data = {3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -392,7 +411,7 @@ TEST(QRelPosAttentionTest, QRelPosAttentionDNNLBatch1) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionDNNL(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
+    mask_index_data, output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads);
 }
 #endif  // USE_DNNL
 
@@ -474,6 +493,8 @@ TEST(QRelPosAttentionTest, QRelPosAttentionBatch1) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  std::vector<int32_t> mask_index_data = {3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -485,7 +506,7 @@ TEST(QRelPosAttentionTest, QRelPosAttentionBatch1) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
+    mask_index_data, output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 TEST(QRelPosAttentionTest, QRelPosttentionBatch2) {
@@ -574,6 +595,8 @@ TEST(QRelPosAttentionTest, QRelPosttentionBatch2) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  std::vector<int32_t> mask_index_data = {3L, 3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -594,7 +617,7 @@ TEST(QRelPosAttentionTest, QRelPosttentionBatch2) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
+    mask_index_data, output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 TEST(QRelPosAttentionTest, QLegacyRelPosAttentionBatch1) {
@@ -673,6 +696,8 @@ TEST(QRelPosAttentionTest, QLegacyRelPosAttentionBatch1) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  std::vector<int32_t> mask_index_data = {3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -684,7 +709,7 @@ TEST(QRelPosAttentionTest, QLegacyRelPosAttentionBatch1) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
+    mask_index_data, output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 TEST(QRelPosAttentionTest, QLegacyRelPosttentionBatch2) {
@@ -769,6 +794,8 @@ TEST(QRelPosAttentionTest, QLegacyRelPosttentionBatch2) {
       1.2f, 0.5f, 1.2f, 0.5f,
       8.4f, 0.0f, 8.4f, 0.0f};
 
+  std::vector<int32_t> mask_index_data = {3L, 3L};
+
   std::vector<float> output_data = {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
@@ -789,7 +816,7 @@ TEST(QRelPosAttentionTest, QLegacyRelPosttentionBatch2) {
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f};
 
   RunQRelPosAttentionAll(input_data, weight_data, pos_emb, pos_weight_data, bias_data, pos_bias_u, pos_bias_v,
-    output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
+    mask_index_data, output_data, batch_size, sequence_length, pos_sequence_length, hidden_size, number_of_heads, is_legacy);
 }
 
 }  // namespace test

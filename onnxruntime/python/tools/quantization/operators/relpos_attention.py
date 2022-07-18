@@ -31,6 +31,7 @@ class RelPosAttentionQuant(QuantOperatorBase):
         inputs.extend(quantized_input_names) # input, weights, pos_emb, pos_weights
         inputs.extend([node.input[4], node.input[5], node.input[6]]) # bias, bias_u, bias_v
         inputs.extend(scale_names) # input_scale, weight_scale, pos_scale, pos_weight_scale
+        inputs.extend([node.input[7] if len(node.input) > 7 else ""]) # mask_index
         inputs.extend(zero_point_names) # zero points
 
         kwargs = {}

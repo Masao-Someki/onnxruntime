@@ -41,7 +41,8 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
                                         const TensorShape& bias_shape,
                                         const TensorShape& pos_emb_shape,
                                         const TensorShape& pos_bias_u_shape,
-                                        const TensorShape& pos_bias_v_shape) const {
+                                        const TensorShape& pos_bias_v_shape,
+                                        const Tensor*& mask_index) const {
   // Input shapes:
   //   input       : (batch_size, sequence_length, input_hidden_size)
   //   weights     : (input_hidden_size, 3 * hidden_size)
@@ -155,6 +156,40 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
     }
   }
 
+  int batch_size = dims[0];
+  if (mask_index != nullptr) {  // mask_index is optional
+    const auto& mask_dims = mask_index->Shape().GetDims();
+    if (mask_dims.size() == 1) {
+      if (static_cast<int>(mask_dims[0]) != batch_size && static_cast<int>(mask_dims[0]) != 2 * batch_size) {
+        return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 1D data shall have length of batch_size or 2 * batch_size");
+      }
+    } else if (mask_dims.size() == 2) {
+      if (static_cast<int>(mask_dims[0]) != batch_size || static_cast<int>(mask_dims[1]) != sequence_length) {
+        // Add operator supports broadcasting. Here we handle a case with only one element in the 2nd dimension.
+        if ((static_cast<int>(mask_dims[0]) == batch_size || static_cast<int>(mask_dims[0]) == 1) && static_cast<int>(mask_dims[1]) == 1) {
+          // Mask will have same value after propogation, which has same effect as no mask.
+          mask_index = nullptr;
+        } else {
+          return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 2D data shall have shape batch_size x (past_sequence_length + sequence_length)");
+        }
+      }
+    } else if (mask_dims.size() == 3) {
+      if (static_cast<int>(mask_dims[0]) != batch_size || static_cast<int>(mask_dims[2]) != sequence_length) {
+        return ORT_MAKE_STATUS(
+          ONNXRUNTIME,
+          INVALID_ARGUMENT,
+          "Inputs 'mask_index' with 3D data shall have shape batch_size x sequence_length x sequence_length ");
+      }
+    } else if (mask_dims.size() == 4) {
+      if (static_cast<int>(mask_dims[0]) != batch_size || mask_dims[1] != 1 || mask_dims[2] != mask_dims[3] || mask_dims[2] < sequence_length) {
+        return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Inputs 'mask_index' with 4D data shall have shape batch_size x 1 x max_sequence_length x max_sequence_length)");
+      }
+    } else {
+      return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Input 'mask_index' is expected to have 1, 2, 3 or 4 dimensions, got ",
+                             mask_dims.size());
+    }
+  }
+
   return Status::OK();
 }
 
@@ -164,12 +199,13 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
                                         const TensorShape& pos_emb_shape,
                                         const TensorShape& pos_bias_u_shape,
                                         const TensorShape& pos_bias_v_shape,
+                                        const Tensor*& mask_index,
                                         const int max_threads_per_block) const {
   if (num_heads_ > max_threads_per_block) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "num_heads should be no larger than ", max_threads_per_block);
   }
 
-  return CheckInputs(input_shape, weight_shape, bias_shape, pos_emb_shape, pos_bias_u_shape, pos_bias_v_shape);
+  return CheckInputs(input_shape, weight_shape, bias_shape, pos_emb_shape, pos_bias_u_shape, pos_bias_v_shape, mask_index);
 }
 
 template <typename T>
@@ -185,12 +221,15 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
   const Tensor* bias = context->Input<Tensor>(4);
   const Tensor* pos_bias_u = context->Input<Tensor>(5);
   const Tensor* pos_bias_v = context->Input<Tensor>(6);
+  const Tensor* mask_index = context->Input<Tensor>(7);
   ORT_RETURN_IF_ERROR(CheckInputs(input->Shape(),
                                   weights->Shape(),
                                   bias->Shape(),
                                   pos_emb->Shape(),
                                   pos_bias_u->Shape(),
-                                  pos_bias_v->Shape()));
+                                  pos_bias_v->Shape(),
+                                  mask_index
+                                  ));
 
   const auto shape = input->Shape().GetDims();
   const auto pos_shape = pos_emb->Shape().GetDims();
@@ -358,7 +397,7 @@ Status RelPosAttention<T>::Compute(OpKernelContext* context) const {
     });
   }
   // Compute the attention score and apply the score to V
-  return ApplyRelPosAttention(Q, K, V, P, pos_bias_u, pos_bias_v, output,
+  return ApplyRelPosAttention(Q, K, V, P, pos_bias_u, pos_bias_v, mask_index, output,
                               batch_size, sequence_length, pos_sequence_length,
                               qkv_head_size[0], qkv_head_size[2], v_hidden_size, context);
 }

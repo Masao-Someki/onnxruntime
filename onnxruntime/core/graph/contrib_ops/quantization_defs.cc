@@ -1232,23 +1232,28 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                                       "T3",
                                       OpSchema::Optional)
                                   .Input(
-                                      11, "input_zp_tensor",
+                                      11, "mask_index",
+                                      "Attention mask index with shape (batch_size)",
+                                      "T4",
+                                      OpSchema::Optional)
+                                  .Input(
+                                      12, "input_zp_tensor",
                                       "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
                                       "T1",
                                       OpSchema::Optional)
                                   .Input(
-                                      12, "iw_zp_tensor",
+                                      13, "iw_zp_tensor",
                                       "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
                                       "Its size should be 3 * hidden_size if it is per-column quantization",
                                       "T2",
                                       OpSchema::Optional)
                                   .Input(
-                                      13, "pos_zp_tensor",
+                                      14, "pos_zp_tensor",
                                       "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
                                       "T1",
                                       OpSchema::Optional)
                                   .Input(
-                                      14, "pw_zp_tensor",
+                                      15, "pw_zp_tensor",
                                       "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
                                       "Its size should be 3 * hidden_size if it is per-column quantization",
                                       "T2",
@@ -1261,6 +1266,7 @@ Wwhere the function `Sigmoid(x) = 1 / (1 + exp(-x))` )DOC";
                                   .TypeConstraint("T1", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
                                   .TypeConstraint("T2", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
                                   .TypeConstraint("T3", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float tensors.")
+                                  .TypeConstraint("T4", {"tensor(int32)"}, "Constrain mask index to integer types")
                                   .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
                                     // Type inference
                                     ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);

@@ -43,7 +43,8 @@ ONNX_OPERATOR_TYPED_KERNEL_EX(
     KernelDefBuilder()
         .TypeConstraint("T1", DataTypeImpl::GetTensorType<uint8_t>())
         .TypeConstraint("T2", {DataTypeImpl::GetTensorType<uint8_t>(), DataTypeImpl::GetTensorType<int8_t>()})
-        .TypeConstraint("T3", DataTypeImpl::GetTensorType<float>()),
+        .TypeConstraint("T3", DataTypeImpl::GetTensorType<float>())
+        .TypeConstraint("T4", DataTypeImpl::GetTensorType<int32_t>()),
     QRelPosAttention<float>);
 
 template <typename T>
@@ -75,17 +76,19 @@ Status QRelPosAttention<T>::Compute(OpKernelContext* context) const {
   const Tensor* weights_scale_tensor = context->Input<Tensor>(8);
   const Tensor* pos_emb_scale_tensor = context->Input<Tensor>(9);
   const Tensor* pos_weights_scale_tensor = context->Input<Tensor>(10);
-  const Tensor* input_zp_tensor = context->Input<Tensor>(11);
-  const Tensor* iw_zp_tensor = context->Input<Tensor>(12);
-  const Tensor* pos_zp_tensor = context->Input<Tensor>(13);
-  const Tensor* pw_zp_tensor = context->Input<Tensor>(14);
+  const Tensor* mask_index = context->Input<Tensor>(11);
+  const Tensor* input_zp_tensor = context->Input<Tensor>(12);
+  const Tensor* iw_zp_tensor = context->Input<Tensor>(13);
+  const Tensor* pos_zp_tensor = context->Input<Tensor>(14);
+  const Tensor* pw_zp_tensor = context->Input<Tensor>(15);
 
   ORT_RETURN_IF_ERROR(RelPosAttentionBase::CheckInputs(input->Shape(),
                                   weights->Shape(),
                                   bias->Shape(),
                                   pos_emb->Shape(),
                                   pos_bias_u->Shape(),
-                                  pos_bias_v->Shape()));
+                                  pos_bias_v->Shape(),
+                                  mask_index));
 
   ORT_RETURN_IF_NOT(IsScalarOr1ElementVector(input_scale_tensor),
                     "input scale must be a scalar or 1D tensor of size 1");
@@ -299,7 +302,7 @@ Status QRelPosAttention<T>::Compute(OpKernelContext* context) const {
   }
 
   // Compute the attention score and apply the score to V
-  return ApplyRelPosAttention(Q, K, V, P, pos_bias_u, pos_bias_v, output,
+  return ApplyRelPosAttention(Q, K, V, P, pos_bias_u, pos_bias_v, mask_index, output,
                               batch_size, sequence_length, pos_sequence_length,
                               head_size, head_size, input_hidden_size, context);
 }

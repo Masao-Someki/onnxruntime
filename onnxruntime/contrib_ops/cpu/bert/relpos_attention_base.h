@@ -19,6 +19,7 @@ class RelPosAttentionBase {
                       const TensorShape& pos_emb_shape,
                       const TensorShape& pos_bias_u_shape,
                       const TensorShape& pos_bias_v_shape,
+                      const Tensor*& mask_index,
                       const int max_threads_per_block) const;
 
  protected:
@@ -39,7 +40,8 @@ class RelPosAttentionBase {
                       const TensorShape& bias_shape,
                       const TensorShape& pos_emb_shape,
                       const TensorShape& pos_bias_u_shape,
-                      const TensorShape& pos_bias_v_shape) const;
+                      const TensorShape& pos_bias_v_shape,
+                      const Tensor*& mask_index) const;
 
   int num_heads_;
   bool is_legacy_;
