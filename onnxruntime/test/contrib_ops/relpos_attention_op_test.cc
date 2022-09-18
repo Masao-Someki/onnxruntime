@@ -41,9 +41,9 @@ static void RunRelPosAttentionTest(
     bool only_enable_cpu = false,
     bool only_enable_cuda = false,
     bool use_float16 = false) {
-  // int min_cuda_architecture = use_float16 ? 530 : 0;
-  // bool enable_cuda = HasCudaEnvironment(min_cuda_architecture) && !only_enable_cpu;
-  bool enable_cuda = false;
+  int min_cuda_architecture = use_float16 ? 530 : 0;
+  bool enable_cuda = HasCudaEnvironment(min_cuda_architecture) && !only_enable_cpu;
+  // bool enable_cuda = false;
   //   bool enable_rocm = (nullptr != DefaultRocmExecutionProvider().get()) && !is_weights_constant && !only_enable_cpu;
   bool enable_cpu = (nullptr != DefaultCpuExecutionProvider().get()) && !use_float16 && !only_enable_cuda;
 

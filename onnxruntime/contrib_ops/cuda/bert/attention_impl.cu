@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/providers/cuda/shared_inc/fpgeneric.h"
 #include "attention_impl.h"
 #include "attention_softmax.h"
+#include "attention_relpos.h"
 #include "transformer_common.h"
 
 using namespace onnxruntime::cuda;
@@ -134,7 +135,7 @@ bool QkvToContext(
     const int mask_dimension = static_cast<int>(mask_index_dims.size());
     const int64_t max_sequence_length = mask_dimension == 4 ? mask_index_dims.at(3) : 0;
 
-    T* persistent_softmax_workspace = scratch1; // replace Q*K' in place with masked score if persistent softmax is selected.
+    T* persistent_softmax_workspace = scratch1;  // replace Q*K' in place with masked score if persistent softmax is selected.
     if (!ComputeSoftmaxWithRawMask<T>(stream, all_sequence_length, sequence_length, batch_size, num_heads, mask_index, nullptr, extra_add_qk, scratch1, scratch2,
                                       is_unidirectional, rsqrt_head_size, mask_dimension, static_cast<int>(max_sequence_length),
                                       use_persistent_softmax, persistent_softmax_workspace)) {
@@ -183,7 +184,6 @@ bool LaunchAttentionKernel(
     const void* past,
     const void* extra_add_qk,
     void* present) {
-
   // For testing, environment variable ORT_TRANSFORMER_OPTIONS=1 could enable persistent softmax
   const TransformerOptions* options = TransformerOptions::GetInstance();
   bool use_persistent_softmax = options->IsPrecisionMode() && !options->DisablePersistentSoftmax();
@@ -205,14 +205,12 @@ bool LaunchAttentionKernel(
   }
 }
 
-
 template <typename T>
 bool CrossQkvToContext(
     const cudaDeviceProp& prop, cublasHandle_t& cublas, cudaStream_t stream,
     const int batch_size, const int sequence_length, const int kv_sequence_length, const int num_heads, const int head_size, const size_t element_size,
     const T* query, const T* key, T* output, T* qkv_buffer, T* workspace_buffer,
     const int* mask_index, gsl::span<const int64_t> mask_index_dims, bool use_persistent_softmax) {
-
   const int max_threads_per_block = prop.maxThreadsPerBlock;
   const int BN = batch_size * num_heads;
   const int BHN = BN * head_size;
@@ -220,20 +218,24 @@ bool CrossQkvToContext(
   const int k_buffer_offset = sequence_length * BHN;
   const int v_buffer_offset = (sequence_length + kv_sequence_length) * BHN;
 
+  cublasSetStream(cublas, stream);
+
   T* temp_qkv_buffer = workspace_buffer;
 
   const T* q = qkv_buffer;
-  //transpose q and copy them to qkv_buffer
+  // transpose q and copy them to qkv_buffer
   if (!LaunchTransQkv(stream, 1, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, query, qkv_buffer)) {
     return false;
   }
 
   const T* k = qkv_buffer + k_buffer_offset;
   const T* v = qkv_buffer + v_buffer_offset;
-  //transpose kv and copy them to qkv_buffer
+  // transpose kv and copy them to qkv_buffer
   if (!LaunchTransQkv(stream, 2, kv_sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, key, qkv_buffer + k_buffer_offset)) {
     return false;
   }
+
+  cublasSetStream(cublas, stream);
 
   // scratch1: BxNxSxS* buffer
   // scratch2: BxNxSxS* buffer
@@ -253,27 +255,26 @@ bool CrossQkvToContext(
   const int strideA = kv_sequence_length * head_size;
   const int strideB = sequence_length * head_size;
   if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
-    cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, k, head_size, strideA,
-    q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
+          cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, k, head_size, strideA,
+          q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
     return false;
   }
 
   // apply softmax and store result P to scratch2: BxNxSxS*
   if (!ComputeSoftmax<T>(stream, kv_sequence_length, sequence_length, batch_size, num_heads, nullptr, scratch1, scratch2, false)) {
-      return false;
+    return false;
   }
 
   // compute P*V (as V*P), and store in scratch3: BxNxSxH
   if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
-      cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, v, head_size, strideA,
-      scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
-      return false;
-    }
+          cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, v, head_size, strideA,
+          scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
+    return false;
+  }
 
   // scratch3 is BxNxSxH, transpose to output BxSxNxH
   return LaunchTransCtx(stream, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, scratch3, output);
 }
-
 
 bool LaunchCrossAttentionKernel(
     const cudaDeviceProp& prop,
@@ -292,53 +293,50 @@ bool LaunchCrossAttentionKernel(
     void* workspace_buffer,
     cublasHandle_t& cublas,
     const size_t element_size) {
-
   // For testing, environment variable ORT_TRANSFORMER_OPTIONS=1 could enable persistent softmax
   const TransformerOptions* options = TransformerOptions::GetInstance();
   bool use_persistent_softmax = options->IsPrecisionMode() && !options->DisablePersistentSoftmax();
 
   if (element_size == 2) {
     return CrossQkvToContext(prop, cublas, stream,
-                        batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
-                        reinterpret_cast<const half*>(query), reinterpret_cast<const half*>(key), reinterpret_cast<half*>(output),
-                        reinterpret_cast<half*>(qkv_buffer), reinterpret_cast<half*>(workspace_buffer),
-                        mask_index, mask_index_dims, use_persistent_softmax);
+                             batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
+                             reinterpret_cast<const half*>(query), reinterpret_cast<const half*>(key), reinterpret_cast<half*>(output),
+                             reinterpret_cast<half*>(qkv_buffer), reinterpret_cast<half*>(workspace_buffer),
+                             mask_index, mask_index_dims, use_persistent_softmax);
   } else {
     return CrossQkvToContext(prop, cublas, stream,
-                        batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
-                        reinterpret_cast<const float*>(query), reinterpret_cast<const float*>(key), reinterpret_cast<float*>(output),
-                        reinterpret_cast<float*>(qkv_buffer), reinterpret_cast<float*>(workspace_buffer),
-                        mask_index, mask_index_dims, use_persistent_softmax);
+                             batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
+                             reinterpret_cast<const float*>(query), reinterpret_cast<const float*>(key), reinterpret_cast<float*>(output),
+                             reinterpret_cast<float*>(qkv_buffer), reinterpret_cast<float*>(workspace_buffer),
+                             mask_index, mask_index_dims, use_persistent_softmax);
   }
 }
 
-
 template <typename T>
 bool DecoderQkvToContext(
-  const cudaDeviceProp& prop,
-  cudaStream_t stream,
-  cublasHandle_t& cublas,
-  const size_t element_size,
-  const int batch_size,
-  const int sequence_length,
-  const int kv_sequence_length,
-  const int num_heads,
-  const int head_size,
-  const bool static_kv,
-  const bool use_past,
-  const bool has_layer_state,
-  const bool has_key_padding_mask,
-  const T* gemm_query_buffer,
-  const T* gemm_kv_buffer,
-  const bool* key_padding_mask,
-  const T* key_cache,
-  const T* value_cache,
-  T* qkv_buffer,
-  T* workspace_buffer,
-  T* output,
-  T* new_key_cache,
-  T* new_value_cache)
-{
+    const cudaDeviceProp& prop,
+    cudaStream_t stream,
+    cublasHandle_t& cublas,
+    const size_t element_size,
+    const int batch_size,
+    const int sequence_length,
+    const int kv_sequence_length,
+    const int num_heads,
+    const int head_size,
+    const bool static_kv,
+    const bool use_past,
+    const bool has_layer_state,
+    const bool has_key_padding_mask,
+    const T* gemm_query_buffer,
+    const T* gemm_kv_buffer,
+    const bool* key_padding_mask,
+    const T* key_cache,
+    const T* value_cache,
+    T* qkv_buffer,
+    T* workspace_buffer,
+    T* output,
+    T* new_key_cache,
+    T* new_value_cache) {
   const int max_threads_per_block = prop.maxThreadsPerBlock;
   const int BN = batch_size * num_heads;
   const int BHN = BN * head_size;
@@ -349,7 +347,7 @@ bool DecoderQkvToContext(
   T* temp_qkv_buffer = workspace_buffer;
 
   const T* q = qkv_buffer;
-  //transpose q and copy them to qkv_buffer
+  // transpose q and copy them to qkv_buffer
   if (!LaunchTransQkv(stream, 1, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, gemm_query_buffer, qkv_buffer)) {
     return false;
   }
@@ -358,30 +356,30 @@ bool DecoderQkvToContext(
   const T* v = qkv_buffer + v_buffer_offset;
   if (!has_layer_state || !use_past) {
     if (!static_kv) {
-      //transpose kv and copy them to qkv_buffer
+      // transpose kv and copy them to qkv_buffer
       if (!LaunchTransQkv(stream, 2, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, gemm_kv_buffer, qkv_buffer + k_buffer_offset)) {
         return false;
       }
     } else {
-      //transpose kv and copy them to qkv_buffer
+      // transpose kv and copy them to qkv_buffer
       if (!LaunchTransQkv(stream, 2, kv_sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, gemm_kv_buffer, qkv_buffer + k_buffer_offset)) {
         return false;
       }
     }
   } else {
     if (!static_kv) {
-      //transpose kv and copy them to temp_buffer
+      // transpose kv and copy them to temp_buffer
       if (!LaunchTransQkv(stream, 2, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, gemm_kv_buffer, temp_qkv_buffer)) {
         return false;
       }
       // concat cache-k with k and copy to qkv_buffer
       if (nullptr != key_cache && !LaunchConcatTensorToTensor(stream, kv_sequence_length, sequence_length, batch_size, head_size, num_heads,
-          max_threads_per_block, 1, key_cache, temp_qkv_buffer, qkv_buffer + k_buffer_offset)) {
+                                                              max_threads_per_block, 1, key_cache, temp_qkv_buffer, qkv_buffer + k_buffer_offset)) {
         return false;
       }
       // concat cache-v with v and copy to qkv_buffer
       if (nullptr != value_cache && !LaunchConcatTensorToTensor(stream, kv_sequence_length, sequence_length, batch_size, head_size, num_heads,
-          max_threads_per_block, 1, value_cache, temp_qkv_buffer + k_buffer_offset, qkv_buffer + v_buffer_offset)) {
+                                                                max_threads_per_block, 1, value_cache, temp_qkv_buffer + k_buffer_offset, qkv_buffer + v_buffer_offset)) {
         return false;
       }
     }
@@ -416,21 +414,21 @@ bool DecoderQkvToContext(
   const int strideB = sequence_length * head_size;
   if (use_past && static_kv) {
     if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
-      cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, key_cache, head_size, strideA,
-      q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
+            cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, key_cache, head_size, strideA,
+            q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
       return false;
     }
   } else {
     if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
-      cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, k, head_size, strideA,
-      q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
+            cublas, CUBLAS_OP_T, CUBLAS_OP_N, kv_sequence_length, sequence_length, head_size, &alpha, k, head_size, strideA,
+            q, head_size, strideB, &zero, scratch1, kv_sequence_length, temp_matrix_size, BN, prop))) {
       return false;
     }
   }
 
   if (has_key_padding_mask) {
     if (!ComputeSoftmaxWithRawMask<T>(stream, kv_sequence_length, sequence_length, batch_size, num_heads, nullptr, key_padding_mask, nullptr, scratch1, scratch2,
-        false, 1, 2, static_cast<int>(0), false, nullptr)) {
+                                      false, 1, 2, static_cast<int>(0), false, nullptr)) {
       return false;
     }
   } else {
@@ -442,14 +440,14 @@ bool DecoderQkvToContext(
   // compute P*V (as V*P), and store in scratch3: BxNxSxH
   if (use_past && static_kv) {
     if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
-      cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, value_cache, head_size, strideA,
-      scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
+            cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, value_cache, head_size, strideA,
+            scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
       return false;
     }
   } else {
     if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
-      cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, v, head_size, strideA,
-      scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
+            cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, v, head_size, strideA,
+            scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
       return false;
     }
   }
@@ -458,85 +456,222 @@ bool DecoderQkvToContext(
   return LaunchTransCtx(stream, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, scratch3, output);
 }
 
-
 bool LaunchDecoderAttentionKernel(
-  const cudaDeviceProp& prop,
-  cudaStream_t stream,
-  cublasHandle_t& cublas,
-  const size_t element_size,
-  const int batch_size,
-  const int sequence_length,
-  const int kv_sequence_length,
-  const int num_heads,
-  const int head_size,
-  const bool static_kv,
-  const bool use_past,
-  const bool has_layer_state,
-  const bool has_key_padding_mask,
-  const void* gemm_query_buffer,
-  const void* gemm_kv_buffer,
-  const bool* key_padding_mask,
-  const void* key_cache,
-  const void* value_cache,
-  void* qkv_buffer,
-  void* workspace_buffer,
-  void* output,
-  void* new_key_cache,
-  void* new_value_cache)
-{
-
+    const cudaDeviceProp& prop,
+    cudaStream_t stream,
+    cublasHandle_t& cublas,
+    const size_t element_size,
+    const int batch_size,
+    const int sequence_length,
+    const int kv_sequence_length,
+    const int num_heads,
+    const int head_size,
+    const bool static_kv,
+    const bool use_past,
+    const bool has_layer_state,
+    const bool has_key_padding_mask,
+    const void* gemm_query_buffer,
+    const void* gemm_kv_buffer,
+    const bool* key_padding_mask,
+    const void* key_cache,
+    const void* value_cache,
+    void* qkv_buffer,
+    void* workspace_buffer,
+    void* output,
+    void* new_key_cache,
+    void* new_value_cache) {
   if (element_size == 2) {
     return DecoderQkvToContext(
-      prop,
-      stream,
-      cublas,
-      element_size,
-      batch_size,
-      sequence_length,
-      kv_sequence_length,
-      num_heads,
-      head_size,
-      static_kv,
-      use_past,
-      has_layer_state,
-      has_key_padding_mask,
-      reinterpret_cast<const half*>(gemm_query_buffer),
-      reinterpret_cast<const half*>(gemm_kv_buffer),
-      key_padding_mask,
-      reinterpret_cast<const half*>(key_cache),
-      reinterpret_cast<const half*>(value_cache),
-      reinterpret_cast<half*>(qkv_buffer),
-      reinterpret_cast<half*>(workspace_buffer),
-      reinterpret_cast<half*>(output),
-      reinterpret_cast<half*>(new_key_cache),
-      reinterpret_cast<half*>(new_value_cache)
-    );
+        prop,
+        stream,
+        cublas,
+        element_size,
+        batch_size,
+        sequence_length,
+        kv_sequence_length,
+        num_heads,
+        head_size,
+        static_kv,
+        use_past,
+        has_layer_state,
+        has_key_padding_mask,
+        reinterpret_cast<const half*>(gemm_query_buffer),
+        reinterpret_cast<const half*>(gemm_kv_buffer),
+        key_padding_mask,
+        reinterpret_cast<const half*>(key_cache),
+        reinterpret_cast<const half*>(value_cache),
+        reinterpret_cast<half*>(qkv_buffer),
+        reinterpret_cast<half*>(workspace_buffer),
+        reinterpret_cast<half*>(output),
+        reinterpret_cast<half*>(new_key_cache),
+        reinterpret_cast<half*>(new_value_cache));
   } else {
     return DecoderQkvToContext(
-      prop,
-      stream,
-      cublas,
-      element_size,
-      batch_size,
-      sequence_length,
-      kv_sequence_length,
-      num_heads,
-      head_size,
-      static_kv,
-      use_past,
-      has_layer_state,
-      has_key_padding_mask,
-      reinterpret_cast<const float*>(gemm_query_buffer),
-      reinterpret_cast<const float*>(gemm_kv_buffer),
-      key_padding_mask,
-      reinterpret_cast<const float*>(key_cache),
-      reinterpret_cast<const float*>(value_cache),
-      reinterpret_cast<float*>(qkv_buffer),
-      reinterpret_cast<float*>(workspace_buffer),
-      reinterpret_cast<float*>(output),
-      reinterpret_cast<float*>(new_key_cache),
-      reinterpret_cast<float*>(new_value_cache)
-    );
+        prop,
+        stream,
+        cublas,
+        element_size,
+        batch_size,
+        sequence_length,
+        kv_sequence_length,
+        num_heads,
+        head_size,
+        static_kv,
+        use_past,
+        has_layer_state,
+        has_key_padding_mask,
+        reinterpret_cast<const float*>(gemm_query_buffer),
+        reinterpret_cast<const float*>(gemm_kv_buffer),
+        key_padding_mask,
+        reinterpret_cast<const float*>(key_cache),
+        reinterpret_cast<const float*>(value_cache),
+        reinterpret_cast<float*>(qkv_buffer),
+        reinterpret_cast<float*>(workspace_buffer),
+        reinterpret_cast<float*>(output),
+        reinterpret_cast<float*>(new_key_cache),
+        reinterpret_cast<float*>(new_value_cache));
+  }
+}
+
+template <typename T>
+bool RelPosQkvToContext(
+    const cudaDeviceProp& prop, cublasHandle_t& cublas, cudaStream_t stream,
+    const int batch_size, const int sequence_length, const int pos_sequence_length, const int num_heads, const int head_size, const size_t element_size,
+    const T* input, const T* pos_emb, T* output, const T* pos_bias_u, const T* pos_bias_v, T* qkvp_buffer, T* workspace_buffer,
+    const int* mask_index, gsl::span<const int64_t> mask_index_dims, bool use_persistent_softmax) {
+  const int max_threads_per_block = prop.maxThreadsPerBlock;
+  const int BN = batch_size * num_heads;
+  const int BHN = BN * head_size;
+  const int BNS = BN * sequence_length;
+  const int q2_buffer_offset = 3 * sequence_length * BHN;
+  const int p_buffer_offset = 4 * sequence_length * BHN;
+
+  // transpose qkvq and copy them to qkv_buffer
+  //  input should be BxSx4xNxH => 4xBxNxSxH
+
+  if (!LaunchTransQkv(
+          stream, 4, sequence_length, batch_size, head_size, num_heads,
+          max_threads_per_block, true, input, qkvp_buffer)) {
+    return false;
+  }
+
+  // Add bias_u
+  if (!LaunchRelPosBiasAdd(stream, sequence_length, batch_size, head_size, num_heads, pos_bias_u, qkvp_buffer)) {
+    return false;
+  }
+  // Add bias_v
+  if (!LaunchRelPosBiasAdd(stream, sequence_length, batch_size, head_size, num_heads, pos_bias_v, qkvp_buffer + q2_buffer_offset)) {
+    return false;
+  }
+
+  // transpose pos_emb and copy them to qkvp_buffer
+  //  input should be BxSxNxH => BxNxSxH
+  if (!LaunchTransQkv(
+          stream, 1, pos_sequence_length, batch_size, head_size, num_heads,
+          max_threads_per_block, true, pos_emb, qkvp_buffer + p_buffer_offset)) {
+    return false;
+  }
+
+
+  // compute matrix_ac
+  const float rsqrt_head_size = 1.f / sqrt(static_cast<float>(head_size));
+  const int temp_matrix_size_qkv = sequence_length * sequence_length;
+  float one = 1.0f;
+  float zero = 0.f;
+
+  const int strideA_qkv = sequence_length * head_size;
+  const int strideB_qkv = sequence_length * head_size;
+
+  T* k = qkvp_buffer + sequence_length * BHN;
+
+  cublasSetStream(cublas, stream);
+  
+  // dot prodact with K
+  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+          cublas, CUBLAS_OP_T, CUBLAS_OP_N, sequence_length, sequence_length, head_size,
+          &one, k, head_size, strideA_qkv,
+          qkvp_buffer, head_size, strideB_qkv, &zero,
+          workspace_buffer, sequence_length, temp_matrix_size_qkv, BN, prop))) {
+    return false;
+  }
+
+  T* p = qkvp_buffer + p_buffer_offset;
+  T* q2 = qkvp_buffer + q2_buffer_offset;
+  T* matrix_bd = workspace_buffer + sequence_length* BNS;
+  const int temp_matrix_size_p = pos_sequence_length * sequence_length;
+  const int strideA_p = pos_sequence_length * head_size;
+  const int strideB_p = sequence_length * head_size;
+  // dot prodact with P
+  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+          cublas, CUBLAS_OP_T, CUBLAS_OP_N, pos_sequence_length, sequence_length, head_size,
+          &one, p, head_size, strideA_p,
+          q2, head_size, strideB_p, &zero,
+          matrix_bd, pos_sequence_length, temp_matrix_size_p, BN, prop))) {
+    return false;
+  }
+
+  // add matrix_ac and matrix_bd and multiply alpha
+  float alpha = rsqrt_head_size;
+  if (!LaunchRelShiftAdd(stream, sequence_length, batch_size, head_size, num_heads, workspace_buffer, matrix_bd, alpha)) {
+    return false;
+  }
+
+  T* softmax_buffer = matrix_bd + pos_sequence_length * BNS;
+  // apply softmax and store result P
+  if (!ComputeSoftmax<T>(stream, sequence_length, sequence_length, batch_size, num_heads, nullptr, workspace_buffer, softmax_buffer, false)) {
+    return false;
+  }
+
+  // compute P*V (as V*P), and store in scratch3: BxNxSxH
+  T* v = qkvp_buffer + 2 * sequence_length * BHN;
+  T* scratch3 = softmax_buffer + sequence_length * BNS;
+  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+          cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, sequence_length, &one, v, head_size, strideA_qkv,
+          softmax_buffer, sequence_length, temp_matrix_size_qkv, &zero, scratch3, head_size, strideB_qkv, BN, prop))) {
+    return false;
+  }
+
+  // scratch3 is BxNxSxH, transpose to output BxSxNxH
+  return LaunchTransCtx(stream, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, scratch3, output);
+}
+
+bool LaunchRelPosAttentionKernel(
+    const cudaDeviceProp& prop,
+    cudaStream_t stream,
+    const void* input,
+    const void* pos_emb,
+    const int* mask_index,
+    gsl::span<const int64_t> mask_index_dims,
+    void* output,
+    const void* pos_bias_u,
+    const void* pos_bias_v,
+    const int batch_size,
+    const int sequence_length,
+    const int pos_sequence_length,
+    const int num_heads,
+    const int head_size,
+    void* qkvp_buffer,
+    void* workspace_buffer,
+    cublasHandle_t& cublas,
+    const size_t element_size) {
+  // For testing, environment variable ORT_TRANSFORMER_OPTIONS=1 could enable persistent softmax
+  const TransformerOptions* options = TransformerOptions::GetInstance();
+  bool use_persistent_softmax = options->IsPrecisionMode() && !options->DisablePersistentSoftmax();
+
+  if (element_size == 2) {
+    return RelPosQkvToContext(prop, cublas, stream,
+                              batch_size, sequence_length, pos_sequence_length, num_heads, head_size, element_size,
+                              reinterpret_cast<const half*>(input), reinterpret_cast<const half*>(pos_emb), reinterpret_cast<half*>(output),
+                              reinterpret_cast<const half*>(pos_bias_u), reinterpret_cast<const half*>(pos_bias_v),
+                              reinterpret_cast<half*>(qkvp_buffer), reinterpret_cast<half*>(workspace_buffer),
+                              mask_index, mask_index_dims, use_persistent_softmax);
+  } else {
+    return RelPosQkvToContext(prop, cublas, stream,
+                              batch_size, sequence_length, pos_sequence_length, num_heads, head_size, element_size,
+                              reinterpret_cast<const float*>(input), reinterpret_cast<const float*>(pos_emb), reinterpret_cast<float*>(output),
+                              reinterpret_cast<const float*>(pos_bias_u), reinterpret_cast<const float*>(pos_bias_v),
+                              reinterpret_cast<float*>(qkvp_buffer), reinterpret_cast<float*>(workspace_buffer),
+                              mask_index, mask_index_dims, use_persistent_softmax);
   }
 }
 

@@ -13,6 +13,7 @@
 # Copyright (c) 2022 Masao Someki
 
 import math
+import time
 import os
 from typing import Dict, List, Optional, Tuple
 
@@ -46,13 +47,15 @@ class AttentionForONNX(nn.Module):
         embed_dim,
         num_heads,
         dropout=0.0,
-        bias=True
+        bias=True,
+        device=None
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
+        self.device = device
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
         
         self.scaling = self.head_dim**-0.5
@@ -64,14 +67,14 @@ class AttentionForONNX(nn.Module):
         # self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         
         self.cache_key = "encoder_decoder" if self.encoder_decoder_attention else "self"
-        self.pos_bias_u = torch.randn(self.num_heads, self.head_dim)
-        self.pos_bias_v = torch.randn(self.num_heads, self.head_dim)
+        self.pos_bias_u = torch.randn(self.num_heads, self.head_dim).to(device)
+        self.pos_bias_v = torch.randn(self.num_heads, self.head_dim).to(device)
         
     def _shape(self, tensor, seq_len, bsz):
         return tensor.contiguous().view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
     
     def rel_shift(self, x):
-        zero_pad = torch.zeros((*x.size()[:3], 1))
+        zero_pad = torch.zeros((*x.size()[:3], 1)).to(self.device)
         x_padded = torch.cat([zero_pad, x], dim=-1)
         x_padded = x_padded.view(*x.size()[:2], x.size(3) + 1, x.size(2))
         x = x_padded[:, :, 1:].view_as(x)[
@@ -80,7 +83,7 @@ class AttentionForONNX(nn.Module):
         return x
     
     def legacy_rel_shift(self, x):
-        zero_pad = torch.zeros((*x.size()[:3], 1))
+        zero_pad = torch.zeros((*x.size()[:3], 1)).to(self.device)
         x_padded = torch.cat([zero_pad, x], dim=-1)
         x_padded = x_padded.view(*x.size()[:2], x.size(3) + 1, x.size(2))
         x = x_padded[:, :, 1:].view_as(x)
@@ -104,8 +107,8 @@ class AttentionForONNX(nn.Module):
         q_with_bias_u = (q + self.pos_bias_u).transpose(1, 2)
         q_with_bias_v = (q + self.pos_bias_v).transpose(1, 2)
         
-        matrix_ac = torch.matmul(q_with_bias_u, k.transpose(2, 3))
-        matrix_bd = torch.matmul(q_with_bias_v, p.transpose(2, 3))
+        matrix_ac = torch.matmul(q_with_bias_u, k.transpose(-2, -1))
+        matrix_bd = torch.matmul(q_with_bias_v, p.transpose(-2, -1))
         
         if legacy:
             matrix_bd = self.legacy_rel_shift(matrix_bd)
@@ -158,9 +161,12 @@ class AttentionForONNX(nn.Module):
         }
         from onnxruntime import InferenceSession, SessionOptions
         sess_options = SessionOptions()
-        ort_session = InferenceSession(onnx_model_str, sess_options, providers=["CPUExecutionProvider"])
+        ort_session = InferenceSession(onnx_model_str, sess_options, providers=["CUDAExecutionProvider"])
         ort_output = ort_session.run(None, ort_inputs)[0]
-        return ort_output
+        start_time = time.time()
+        ort_output = ort_session.run(None, ort_inputs)[0]
+        end_time = time.time() - start_time
+        return ort_output, end_time
 
 
 def create_relpos_attention_graph(
@@ -221,25 +227,26 @@ def create_relpos_attention_graph(
 
 
 def create_inputs(
-    config: Config
+    config: Config,
+    device,
 ):
     input = torch.normal(
         mean=0.0,
         std=0.1,
         size=(config.batch_size, config.sequence_length, config.embed_dim),
-    ).to(torch.float32)
+    ).to(device)
     if config.legacy:
         pos_emb = torch.normal(
             mean=0.0,
             std=0.1,
             size=(config.batch_size, config.sequence_length, config.embed_dim),
-        ).to(torch.float32)
+        ).to(device)
     else:
         pos_emb = torch.normal(
             mean=0.0,
             std=0.1,
             size=(config.batch_size, 2 * config.sequence_length - 1, config.embed_dim),
-        ).to(torch.float32)
+        ).to(device)
 
     return input, pos_emb
 
@@ -248,20 +255,29 @@ def parity_check(
     config,
     rtol=1e-4,
     atol=5e-4,
+    device=None,
 ):
-    query, key = create_inputs(config)
-    attn = AttentionForONNX(config.embed_dim, config.num_heads)
+    query, key = create_inputs(config, device)
+    attn = AttentionForONNX(config.embed_dim, config.num_heads, device=device)
+    attn.to(device)
     attn_output = attn.forward(
         query,
         key,
         config.legacy,
     )
-    attn_output_ort = attn.ORT_forward(
+    start_time = time.time()
+    attn_output = attn.forward(
         query,
         key,
         config.legacy,
     )
-    attn_output_ort_1 = attn.ORT_forward(
+    torch_time = time.time() - start_time
+    attn_output_ort, onnx_time = attn.ORT_forward(
+        query,
+        key,
+        config.legacy,
+    )
+    attn_output_ort_1, _ = attn.ORT_forward(
         query,
         key,
         config.legacy,
@@ -275,35 +291,37 @@ def parity_check(
         config.legacy,
         " h:",
         config.embed_dim,
-        "[attn_output, randomness] parity:",
-        numpy.allclose(
-            attn_output.detach().numpy(),
-            attn_output_ort,
-            rtol=rtol,
-            atol=atol,
-            equal_nan=True,
-        ),
-        numpy.allclose(
-            attn_output_ort_1,
-            attn_output_ort,
-            rtol=rtol,
-            atol=atol,
-            equal_nan=True,
-        ),
-        mse(attn_output.detach().numpy(), attn_output_ort),
-        mse(attn_output_ort_1, attn_output_ort)
+        # "[attn_output, randomness] parity:",
+        # numpy.allclose(
+        #     attn_output.cpu().detach().numpy(),
+        #     attn_output_ort,
+        #     rtol=rtol,
+        #     atol=atol,
+        #     equal_nan=True,
+        # ),
+        # numpy.allclose(
+        #     attn_output_ort_1,
+        #     attn_output_ort,
+        #     rtol=rtol,
+        #     atol=atol,
+        #     equal_nan=True,
+        # ),
+        mse(attn_output.cpu().detach().numpy(), attn_output_ort),
+        mse(attn_output_ort_1, attn_output_ort),
+        "speed up:%.5f" % (torch_time / onnx_time)
     )
 
 def mse(a, b):
     return ((a - b) ** 2).mean()
 
 if __name__ == "__main__":
-    for b in [1, 10, 20]:
-        for s in [1, 16, 32]:
+    for b in [1]:
+        for s in [1, 32, 256]:
             for leg in [0, 1]:
-                for n in [8]:
-                    for h in [64, 128, 256]:
+                for n in [4, 8]:
+                    for h in [32, 64]:
                         config = Config(b, s, leg, n, h)
                         parity_check(
-                            config
+                            config,
+                            device='cuda'
                         )

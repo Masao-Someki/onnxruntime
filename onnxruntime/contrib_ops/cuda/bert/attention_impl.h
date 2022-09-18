@@ -84,6 +84,27 @@ bool LaunchDecoderAttentionKernel(
     void* new_value_cache             // New_value_cache tensor
 );
 
+bool LaunchRelPosAttentionKernel(
+    const cudaDeviceProp& prop,
+    cudaStream_t stream,
+    const void* input,
+    const void* pos_emb,
+    const int* mask_index,
+    gsl::span<const int64_t> mask_index_dims,
+    void* output,
+    const void* pos_bias_u,
+    const void* pos_bias_v,
+    const int batch_size,
+    const int sequence_length,
+    const int pos_sequence_length,
+    const int num_heads,
+    const int head_size,
+    void* qkvp_buffer,
+    void* workspace_buffer,
+    cublasHandle_t& cublas,
+    const size_t element_size
+);
+
 bool LaunchTransCtx(cudaStream_t stream,
                     const int sequence_length, const int batch_size, const int head_size, const int num_heads,
                     const int max_threads_per_block, const bool reversed_bs, const float* input, float* output);

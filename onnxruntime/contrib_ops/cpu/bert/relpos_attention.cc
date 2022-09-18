@@ -193,20 +193,20 @@ Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
   return Status::OK();
 }
 
-Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
-                                        const TensorShape& weight_shape,
-                                        const TensorShape& bias_shape,
-                                        const TensorShape& pos_emb_shape,
-                                        const TensorShape& pos_bias_u_shape,
-                                        const TensorShape& pos_bias_v_shape,
-                                        const Tensor*& mask_index,
-                                        const int max_threads_per_block) const {
-  if (num_heads_ > max_threads_per_block) {
-    return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "num_heads should be no larger than ", max_threads_per_block);
-  }
+// Status RelPosAttentionBase::CheckInputs(const TensorShape& input_shape,
+//                                         const TensorShape& weight_shape,
+//                                         const TensorShape& bias_shape,
+//                                         const TensorShape& pos_emb_shape,
+//                                         const TensorShape& pos_bias_u_shape,
+//                                         const TensorShape& pos_bias_v_shape,
+//                                         const Tensor*& mask_index,
+//                                         const int max_threads_per_block) const {
+//   if (num_heads_ > max_threads_per_block) {
+//     return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "num_heads should be no larger than ", max_threads_per_block);
+//   }
 
-  return CheckInputs(input_shape, weight_shape, bias_shape, pos_emb_shape, pos_bias_u_shape, pos_bias_v_shape, mask_index);
-}
+//   return CheckInputs(input_shape, weight_shape, bias_shape, pos_emb_shape, pos_bias_u_shape, pos_bias_v_shape, mask_index);
+// }
 
 template <typename T>
 RelPosAttention<T>::RelPosAttention(const OpKernelInfo& info) : OpKernel(info), RelPosAttentionCPUBase(info) {
