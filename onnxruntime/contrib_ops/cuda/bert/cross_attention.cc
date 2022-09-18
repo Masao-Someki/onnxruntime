@@ -43,9 +43,9 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
   const Tensor* mask_index = context->Input<Tensor>(6);
 
   auto& device_prop = GetDeviceProp();
-  ORT_RETURN_IF_ERROR(CheckInputs(
-    query->Shape(), key->Shape(), q_weights->Shape(), kv_weights->Shape(),
-    q_bias->Shape(), kv_bias->Shape(), mask_index, device_prop.maxThreadsPerBlock));
+  // ORT_RETURN_IF_ERROR(CheckInputs(
+  //   query->Shape(), key->Shape(), q_weights->Shape(), kv_weights->Shape(),
+  //   q_bias->Shape(), kv_bias->Shape(), mask_index, device_prop.maxThreadsPerBlock));
 
   // input shape (batch_size, sequence_length, input_hidden_size)
   const auto& q_shape = query->Shape();

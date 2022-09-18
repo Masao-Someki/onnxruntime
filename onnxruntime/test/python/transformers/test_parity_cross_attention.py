@@ -20,6 +20,7 @@ import numpy
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+import time
 
 torch.manual_seed(0)
 
@@ -30,6 +31,7 @@ class Config:
     num_heads = 0
     head_size = 0
     embed_dim = 0
+    
     def __init__(self, b, s, s2, n, h):
         self.batch_size = b
         self.sequence_length = s
@@ -46,10 +48,13 @@ class AttentionProjection(nn.Module):
         self.head_dim = head_dim
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        
     def shape_state(self, state, batch_size):
         return state.view(batch_size * self.num_heads, -1, self.head_dim)
+    
     def shape_proj(self, proj, batch_size):
         return proj.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+    
     def forward(
         self,
         query,
@@ -71,6 +76,7 @@ class AttentionForONNX(nn.Module):
         num_heads,
         dropout=0.0,
         bias=True,
+        device='cpu'
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -84,8 +90,11 @@ class AttentionForONNX(nn.Module):
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.cache_key = "encoder_decoder" if self.encoder_decoder_attention else "self"
+        self.device = device
+        
     def _shape(self, tensor, seq_len, bsz):
         return tensor.contiguous().view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+    
     def forward(
         self,
         query,
@@ -104,6 +113,7 @@ class AttentionForONNX(nn.Module):
         assert v is not None
         attn_output = torch.matmul(attn_weights, v)
         return attn_output.transpose(1, 2).reshape(bsz, tgt_len, embed_dim)
+    
     def ORT_forward(
         self,
         query,
@@ -139,9 +149,17 @@ class AttentionForONNX(nn.Module):
         }
         from onnxruntime import InferenceSession, SessionOptions
         sess_options = SessionOptions()
-        ort_session = InferenceSession(onnx_model_str, sess_options, providers=["CPUExecutionProvider"])
+        if self.device == 'cpu':
+            providers = ['CPUExecutionProvider']
+        else:
+            providers = ['CUDAExecutionProvider']
+        ort_session = InferenceSession(onnx_model_str, sess_options, providers=providers)
         ort_output = ort_session.run(None, ort_inputs)[0]
-        return ort_output
+        ort_output = ort_session.run(None, ort_inputs)[0]
+        start_time = time.time()
+        ort_output = ort_session.run(None, ort_inputs)[0]
+        end_time = time.time()
+        return ort_output, end_time - start_time
 
 
 def create_cross_attention_graph(
@@ -197,38 +215,46 @@ def create_cross_attention_graph(
 
 
 def create_inputs(
-    config: Config
+    config: Config, device: str,
 ):
     query = torch.normal(
         mean=0.0,
         std=0.1,
         size=(config.batch_size, config.sequence_length, config.embed_dim),
-    ).to(torch.float32)
+    ).type(torch.float32).to(device)
     key = torch.normal(
         mean=0.0,
         std=0.1,
         size=(config.batch_size, config.kv_sequence_length, config.embed_dim),
-    ).to(torch.float32)
+    ).type(torch.float32).to(device)
 
     return query, key
 
 
 def parity_check(
     config,
+    device='cpu',
     rtol=1e-4,
     atol=5e-4,
 ):
-    query, key = create_inputs(config)
-    attn = AttentionForONNX(config.embed_dim, config.num_heads)
+    query, key = create_inputs(config, device)
+    attn = AttentionForONNX(config.embed_dim, config.num_heads, device)
+    attn.to(device)
     attn_output = attn.forward(
         query,
         key,
     )
-    attn_output_ort = attn.ORT_forward(
+    start_time = time.time()
+    attn_output = attn.forward(
         query,
         key,
     )
-    attn_output_ort_1 = attn.ORT_forward(
+    torch_time = time.time() - start_time
+    attn_output_ort, onnx_time = attn.ORT_forward(
+        query,
+        key,
+    )
+    attn_output_ort_1, _ = attn.ORT_forward(
         query,
         key,
     )
@@ -243,7 +269,7 @@ def parity_check(
         config.embed_dim,
         "[attn_output, randomness] parity:",
         numpy.allclose(
-            attn_output.detach().numpy(),
+            attn_output.cpu().detach().numpy(),
             attn_output_ort,
             rtol=rtol,
             atol=atol,
@@ -256,20 +282,25 @@ def parity_check(
             atol=atol,
             equal_nan=True,
         ),
-        mse(attn_output.detach().numpy(), attn_output_ort),
-        mse(attn_output_ort_1, attn_output_ort)
+        mse(attn_output.cpu().detach().numpy(), attn_output_ort),
+        mse(attn_output_ort_1, attn_output_ort),
+        "speed up:%.5f" % (torch_time / onnx_time),
+        "device:", d
     )
 
 def mse(a, b):
     return ((a - b) ** 2).mean()
 
 if __name__ == "__main__":
-    for b in [1, 10, 20]:
-        for s in [1, 16, 32]:
-            for s2 in [64, 128, 256]:
-                for n in [8]:
-                    for h in [64, 128, 256]:
-                        config = Config(b, s, s2, n, h)
-                        parity_check(
-                            config
-                        )
+    # for d in ['cpu', 'cuda']:
+    for d in ['cuda']:
+        for b in [1]:
+            for s in [32, 256]:
+                for s2 in [256]:
+                    for n in [4, 8]:
+                        for h in [64,128]:
+                            config = Config(b, s, s2, n, h)
+                            parity_check(
+                                config,
+                                device=d
+                            )
