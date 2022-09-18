@@ -440,9 +440,14 @@ class FusionAttention(Fusion):
             _, mask_nodes, _ = self.model.match_parent_paths(
                 add_qk, [(['Mul', 'Sub', 'Cast', 'Unsqueeze', 'Unsqueeze'], [None, 0, 1, 0, 0]),
                          (['Mul', 'Sub', 'Unsqueeze', 'Unsqueeze'], [None, 0, 1, 0])], output_name_to_node)
+        
         if mask_nodes is None:
-            logger.debug("fuse_attention: failed to match mask path")
-            return
+            mask_nodes = self.model.match_parent_path(
+                matmul_qk, ['Mul', 'Sub', 'Unsqueeze'], [None, 0, 1])
+            if mask_nodes is None:
+                logger.debug("fuse_attention: failed to match mask path")
+                return
+            self.attention_mask.set_mask_format(AttentionMaskFormat.AttentionMask)
 
         if matmul_v.input[0] == root_input and matmul_q.input[0] == root_input and matmul_k.input[0] == root_input:
             mask_index = self.attention_mask.process_mask(mask_nodes[-1].input[0])
