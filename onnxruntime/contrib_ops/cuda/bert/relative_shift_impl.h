@@ -9,33 +9,23 @@ namespace onnxruntime {
 namespace contrib {
 namespace cuda {
 
-bool LaunchRelPosBiasAdd(
-    cudaStream_t stream,
-    const int sequence_length,
-    const int batch_size,
-    const int head_size,
-    const int num_heads,
-    const float* pos_bias,
-    float* query);
+// bool LaunchRelPosBiasAdd(
+//     cudaStream_t stream,
+//     const int sequence_length,
+//     const int batch_size,
+//     const int head_size,
+//     const int num_heads,
+//     const float* pos_bias,
+//     float* query);
 
-bool LaunchRelPosBiasAdd(
-    cudaStream_t stream,
-    const int sequence_length,
-    const int batch_size,
-    const int head_size,
-    const int num_heads,
-    const half* pos_bias,
-    half* query);
-
-bool LaunchRelShiftAdd(
-    cudaStream_t stream,
-    const int sequence_length,
-    const int pos_sequence_length,
-    const int batch_size,
-    const int num_heads,
-    float* matrix_ac,
-    float* matrix_bd,
-    float alpha);
+// bool LaunchRelPosBiasAdd(
+//     cudaStream_t stream,
+//     const int sequence_length,
+//     const int batch_size,
+//     const int head_size,
+//     const int num_heads,
+//     const half* pos_bias,
+//     half* query);
 
 bool LaunchRelShiftAdd(
     cudaStream_t stream,
@@ -43,9 +33,19 @@ bool LaunchRelShiftAdd(
     const int pos_sequence_length,
     const int batch_size,
     const int num_heads,
-    half* matrix_ac,
-    half* matrix_bd,
-    float alpha);
+    const float* matrix_ac,
+    const float* matrix_bd,
+    float* output);
+
+bool LaunchRelShiftAdd(
+    cudaStream_t stream,
+    const int sequence_length,
+    const int pos_sequence_length,
+    const int batch_size,
+    const int num_heads,
+    const half* matrix_ac,
+    const half* matrix_bd,
+    half* output);
 
 }  // namespace cuda
 }  // namespace contrib

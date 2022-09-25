@@ -107,7 +107,18 @@ void CrossAttentionTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) 
 void RelPosAttentionTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) {
   // Type inference
   ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
-  
+
+  // Shape inference
+  if (hasInputShape(ctx, 0)) {
+    auto& input_shape = getInputShape(ctx, 0);
+    updateOutputShape(ctx, 0, input_shape);
+  }
+}
+
+void RelativeShiftTypeAndShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) {
+  // Type inference
+  ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+
   // Shape inference
   if (hasInputShape(ctx, 0)) {
     auto& input_shape = getInputShape(ctx, 0);
@@ -283,6 +294,29 @@ ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(RelPosAttention, 1,
                                 .TypeConstraint("M", {"tensor(int32)"}, "Constrain mask index to integer types")
                                 .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
                                   RelPosAttentionTypeAndShapeInference(ctx);
+                                }));
+
+
+constexpr const char* Relative_Shift_doc = R"DOC(
+The relative shift function for Conformer.
+This function computes both legacy and latest version of rel_shift in ESPnet.
+)DOC";
+
+ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(RelativeShift, 1,
+                            OpSchema()
+                                .SetDomain(kENDomain)
+                                .SetDoc(Relative_Shift_doc)
+                                .SinceVersion(1)
+                                .Attr("legacy",
+                                      "Flag to check if the attention is legacy version. Default value is 0, = latest version.",
+                                      AttributeProto::INT,
+                                      static_cast<int64_t>(0))
+                                .Input(0, "matrix_ac", "3D input tensor with shape (batch_size, sequence_length, hidden_size), hidden_size = num_heads * head_size", "T")
+                                .Input(1, "matrix_bd", "3D input tensor with shape (3 * sequence_length, hidden_size)", "T")
+                                .Output(0, "output", "3D output tensor with shape (sequence_length, batch_size, hidden_size)", "T")
+                                .TypeConstraint("T", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float and float16 tensors.")
+                                .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                  RelativeShiftTypeAndShapeInference(ctx);
                                 }));
 
 constexpr const char* EmbedLayerNormalization_ver1_doc = R"DOC(

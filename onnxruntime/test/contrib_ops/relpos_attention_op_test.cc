@@ -41,9 +41,9 @@ static void RunRelPosAttentionTest(
     bool only_enable_cpu = false,
     bool only_enable_cuda = false,
     bool use_float16 = false) {
-  int min_cuda_architecture = use_float16 ? 530 : 0;
-  bool enable_cuda = HasCudaEnvironment(min_cuda_architecture) && !only_enable_cpu;
-  // bool enable_cuda = false;
+  // int min_cuda_architecture = use_float16 ? 530 : 0;
+  // bool enable_cuda = HasCudaEnvironment(min_cuda_architecture) && !only_enable_cpu;
+  bool enable_cuda = false;
   //   bool enable_rocm = (nullptr != DefaultRocmExecutionProvider().get()) && !is_weights_constant && !only_enable_cpu;
   bool enable_cpu = (nullptr != DefaultCpuExecutionProvider().get()) && !use_float16 && !only_enable_cuda;
 
@@ -155,7 +155,7 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch1) {
 
   std::vector<float> weight_data = {
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -171,7 +171,7 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch1) {
       8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
 
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -188,11 +188,11 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch1) {
       };
 
   std::vector<float> pos_weight_data = {
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f};
@@ -261,7 +261,7 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch2) {
 
   std::vector<float> weight_data = {
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -277,7 +277,7 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch2) {
       8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
 
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -294,11 +294,11 @@ TEST(RelPosAttentionTest, RelPosAttentionBatch2) {
       };
 
   std::vector<float> pos_weight_data = {
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f};
@@ -366,7 +366,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch1) {
 
   std::vector<float> weight_data = {
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -382,7 +382,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch1) {
       8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
 
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -399,11 +399,11 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch1) {
       };
 
   std::vector<float> pos_weight_data = {
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f};
@@ -468,7 +468,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch2) {
 
   std::vector<float> weight_data = {
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+      1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -484,7 +484,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch2) {
       8.4f, 0.0f, 2.1f, 3.2f, 8.4f, 0.0f, 2.1f, 3.2f,
 
       0.1f, -0.2f, 0.3f, 1.0f, 0.1f, -0.2f, 0.3f, 1.0f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       0.3f, -0.6f, 1.5f, 2.0f, 0.3f, -0.6f, 1.5f, 2.0f,
 
       0.5f, 0.1f, 0.4f, 1.6f, 0.5f, 0.1f, 0.4f, 1.6f,
@@ -501,11 +501,11 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch2) {
       };
 
   std::vector<float> pos_weight_data = {
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f,
-     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f, 
+     1.1f, 0.3f, 0.5f, 0.2f, 1.1f, 0.3f, 0.5f, 0.2f,
       1.0f, 2.0f, 0.4f, 0.8f, 1.0f, 2.0f, 0.4f, 0.8f,
       1.6f, 1.1f, 0.7f, 0.2f, 1.6f, 1.1f, 0.7f, 0.2f,
       2.4f, 3.3f, 2.1f, 4.2f, 2.4f, 3.3f, 2.1f, 4.2f};
@@ -539,7 +539,7 @@ TEST(RelPosAttentionTest, LegacyRelPosAttentionBatch2) {
 
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
       16.8799991607666016f, -0.6599999666213989f, 8.1999998092651367f, 10.0999994277954102f,
-      
+
       -6.4679698944091797f, 0.3448030948638916f, 0.2346523106098175f, 0.8192735314369202f,
       -8.6457786560058594f, 0.4385272860527039f, -0.5083251595497131f, -0.0463974177837372f,
 

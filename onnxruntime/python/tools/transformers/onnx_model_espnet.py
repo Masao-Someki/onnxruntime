@@ -2,31 +2,32 @@
 # Copyright (c) Microsoft Corporation.  All rights reserved.
 # Licensed under the MIT License.
 # --------------------------------------------------------------------------
-# 
+#
 # Modified by author.
 # Copyright (c) 2022 Masao Someki.
-# 
+#
 
 from logging import getLogger
 from typing import List
 
+from onnx import GraphProto, ModelProto, TensorProto, ValueInfoProto, helper
+
+from fusion_attention import AttentionMask, FusionAttention
 from fusion_biasgelu import FusionBiasGelu
+from fusion_cross_attention import FusionCrossAttention
 from fusion_embedlayer import FusionEmbedLayerNormalization
 from fusion_fastgelu import FusionFastGelu
 from fusion_gelu import FusionGelu
 from fusion_gelu_approximation import FusionGeluApproximation
 from fusion_layernorm import FusionLayerNormalization, FusionLayerNormalizationTF
 from fusion_options import FusionOptions
+from fusion_relative_shift import FusionRelativeShift
+from fusion_relpos_attention import FusionRelPosAttention
 from fusion_reshape import FusionReshape
 from fusion_shape import FusionShape
 from fusion_skiplayernorm import FusionBiasSkipLayerNormalization, FusionSkipLayerNormalization
 from fusion_utils import FusionUtils
 from onnx_model import OnnxModel
-from onnx import GraphProto, ModelProto, TensorProto, ValueInfoProto, helper
-
-from fusion_attention import AttentionMask, FusionAttention
-from fusion_cross_attention import FusionCrossAttention
-from fusion_relpos_attention import FusionRelPosAttention
 
 logger = getLogger(__name__)
 
@@ -77,12 +78,21 @@ class ESPnetOnnxModel(OnnxModel):
             self.num_heads,
             self.attention_mask
         )
+        self.relative_shift_fusion = FusionRelativeShift(
+            self,
+        )
         self.utils = FusionUtils(self)
 
     def fuse_attention(self):
         self.attention_fusion.apply()
         self.cross_attention_fusion.apply()
         self.relpos_attention_fusion.apply()
+
+    def fuse_attention_gpu(self):
+        self.attention_fusion.apply()
+        # self.cross_attention_fusion.apply()
+        # self.relpos_attention_fusion.apply()
+        self.relative_shift_fusion.apply()
 
     def fuse_gelu(self):
         fusion = FusionGelu(self)
@@ -382,9 +392,13 @@ class ESPnetOnnxModel(OnnxModel):
         if (options is None) or options.enable_skip_layer_norm:
             self.fuse_skip_layer_norm()
 
-        if (options is None) or options.enable_attention:
-            if options is not None:
-                self.attention_mask.set_mask_format(options.attention_mask_format)
+        # if (options is None) or options.enable_attention:
+        #     if options is not None:
+        #         self.attention_mask.set_mask_format(options.attention_mask_format)
+        #     self.fuse_attention()
+        if options.use_gpu:
+            self.fuse_attention_gpu()
+        else:
             self.fuse_attention()
 
         self.fuse_shape()

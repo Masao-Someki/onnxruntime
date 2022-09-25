@@ -61,12 +61,12 @@ namespace onnxruntime
 
         // I compute matrix_ac
         const auto* pos_bias_u_data = pos_bias_u->template Data<T>();
-        ComputeAttentionProbs<T>(static_cast<T*>(matrix_ac), Q, K, pos_bias_u_data, static_cast<T*>(temp_buffer_mat), 
+        ComputeAttentionProbs<T>(static_cast<T*>(matrix_ac), Q, K, pos_bias_u_data, static_cast<T*>(temp_buffer_mat),
                                  batch_size, sequence_length, sequence_length,
                                  qk_head_size, tp);
         // II compute matrix_bd
         const auto* pos_bias_v_data = pos_bias_v->template Data<T>();
-        ComputeAttentionProbs<T>(static_cast<T*>(matrix_bd), Q, P, pos_bias_v_data, static_cast<T*>(temp_buffer_mat), 
+        ComputeAttentionProbs<T>(static_cast<T*>(matrix_bd), Q, P, pos_bias_v_data, static_cast<T*>(temp_buffer_mat),
                                  batch_size, sequence_length, pos_sequence_length,
                                  qk_head_size, tp);
 
@@ -223,7 +223,7 @@ namespace onnxruntime
           const int D = sequence_length;
           ComputeAttentionSoftmaxInplace(matrix_ac, N, D, tp);
         }
-      }
+      };
 
       template <typename T>
       void ComputeRelShift(
@@ -255,7 +255,7 @@ namespace onnxruntime
               const int output_offset = static_cast<int>(i) * sequence_length * sequence_length;
               const int batch_index = static_cast<int>(i) / num_heads_;
               const int mask_offset = batch_index * sequence_length * sequence_length;
-              int bd_input_offset = sequence_length * pos_sequence_length * static_cast<int>(i); 
+              int bd_input_offset = sequence_length * pos_sequence_length * static_cast<int>(i);
 
               for (int seq_index = 0; seq_index < sequence_length; seq_index++) {
                 const int oidx = static_cast<int>(seq_index) * sequence_length + output_offset;

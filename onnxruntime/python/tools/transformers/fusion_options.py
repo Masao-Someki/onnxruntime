@@ -25,6 +25,7 @@ class FusionOptions:
         self.enable_bias_gelu = True
         self.enable_gelu_approximation = False
         self.attention_mask_format = AttentionMaskFormat.AttentionMask
+        self.use_gpu = False
 
         if model_type == 'gpt2':
             self.enable_skip_layer_norm = False
@@ -61,6 +62,8 @@ class FusionOptions:
             options.use_raw_attention_mask(False)
         if args.no_attention_mask:
             options.disable_attention_mask()
+        if args.use_gpu:
+            options.use_gpu = True
         return options
 
     @staticmethod

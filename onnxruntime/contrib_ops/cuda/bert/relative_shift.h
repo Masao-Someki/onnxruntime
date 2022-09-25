@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
+// Modification by Masao Someki
 
 #pragma once
 
 #include "core/providers/cuda/cuda_kernel.h"
-#include "contrib_ops/cpu/bert/relpos_attention_base.h"
 
 namespace onnxruntime {
 namespace contrib {
@@ -13,9 +13,9 @@ namespace cuda {
 using namespace onnxruntime::cuda;
 
 template <typename T>
-class RelPosAttention final : public CudaKernel, public RelPosAttentionBase {
+class RelativeShift final : public CudaKernel {
  public:
-  RelPosAttention(const OpKernelInfo& info);
+  RelativeShift(const OpKernelInfo& info);
   Status ComputeInternal(OpKernelContext* context) const override;
 };
 
