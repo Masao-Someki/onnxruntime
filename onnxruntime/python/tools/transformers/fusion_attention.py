@@ -465,8 +465,12 @@ class FusionAttention(Fusion):
 
         v_nodes = self.model.match_parent_path(matmul_qkv, ["Transpose", "Reshape", "Add", "MatMul"], [1, 0, 0, None])
         if v_nodes is None:
-            logger.debug("fuse_attention: failed to match v path")
-            return
+            mask_nodes = self.model.match_parent_path(
+                matmul_qk, ['Mul', 'Sub', 'Unsqueeze'], [None, 0, 1])
+            if mask_nodes is None:
+                logger.debug("fuse_attention: failed to match mask path")
+                return
+            self.attention_mask.set_mask_format(AttentionMaskFormat.AttentionMask)
         (_, _, add_v, matmul_v) = v_nodes
 
         is_distill = False

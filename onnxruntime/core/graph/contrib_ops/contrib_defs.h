@@ -17,6 +17,10 @@
 #define ONNX_CONTRIB_OPERATOR_SET_SCHEMA(name, ver, impl) \
   ONNX_OPERATOR_SET_SCHEMA_EX(name, Onnx, ::ONNX_NAMESPACE::ONNX_DOMAIN, ver, true, impl)
 
+//They are in ONNX domain but they are in our source code
+#define ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(name, ver, impl) \
+  ONNX_OPERATOR_SET_SCHEMA_EX(name, ESPnetOnnx, ::onnxruntime::kENDomain, ver, true, impl)
+
 namespace onnxruntime {
 namespace contrib {
 namespace utils {

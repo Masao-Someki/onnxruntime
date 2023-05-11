@@ -149,7 +149,7 @@ TEST(DecoderAttentionTest, SelfAttentionNoStateNoCache) {
                    /*static_kv*/false, /*use_past*/false, /*has_layer_state*/false, /*has_key_padding_mask*/false);
 }
 
-TEST(DecoderAttentionTest, CrossAttentionNoStateNoCache) {
+TEST(DecoderAttentionTest, DecoderAttentionNoStateNoCache) {
   int batch_size = 1;
   int sequence_length = 2;
   int kv_sequence_length = 2;
@@ -228,7 +228,7 @@ TEST(DecoderAttentionTest, SelfAttentionNoStateOutputCache) {
                    &new_key_cache, &new_value_cache);
 }
 
-TEST(DecoderAttentionTest, CrossAttentionNoStateOutputCache) {
+TEST(DecoderAttentionTest, DecoderAttentionNoStateOutputCache) {
   int batch_size = 1;
   int sequence_length = 2;
   int kv_sequence_length = 2;
@@ -323,7 +323,7 @@ TEST(DecoderAttentionTest, SelfAttentionWithCache) {
                    &new_key_cache, &new_value_cache, &key_cache, &value_cache);
 }
 
-TEST(DecoderAttentionTest, CrossAttentionWithCache) {
+TEST(DecoderAttentionTest, DecoderAttentionWithCache) {
   int batch_size = 1;
   int sequence_length = 2;
   int kv_sequence_length = 2;

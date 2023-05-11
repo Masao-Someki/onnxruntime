@@ -1,6 +1,8 @@
 from .operators.activation import QDQRemovableActivation, QLinearActivation
 from .operators.argmax import QArgMax
 from .operators.attention import AttentionQuant
+from .operators.cross_attention import CrossAttentionQuant
+from .operators.relpos_attention import RelPosAttentionQuant
 from .operators.base_operator import QuantOperatorBase
 from .operators.binary_op import QLinearBinaryOp
 from .operators.concat import QLinearConcat
@@ -32,6 +34,8 @@ IntegerOpsRegistry = {
     "Conv": ConvInteger,
     "MatMul": MatMulInteger,
     "Attention": AttentionQuant,
+    "CrossAttention": CrossAttentionQuant,
+    "RelPosAttention": RelPosAttentionQuant,
     "LSTM": LSTMQuant,
 }
 IntegerOpsRegistry.update(CommonOpsRegistry)

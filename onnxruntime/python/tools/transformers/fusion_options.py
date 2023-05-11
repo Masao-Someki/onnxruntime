@@ -49,6 +49,7 @@ class FusionOptions:
         self.attention_mask_format = (
             AttentionMaskFormat.MaskIndexEnd if model_type == "bert" else AttentionMaskFormat.AttentionMask
         )
+        self.use_gpu = False
 
         # options for stable diffusion
         self.enable_group_norm = model_type == "unet"
@@ -99,6 +100,8 @@ class FusionOptions:
             options.enable_group_norm = False
         if args.disable_packed_kv:
             options.enable_packed_kv = False
+        if args.use_gpu:
+            options.use_gpu = True
         return options
 
     @staticmethod

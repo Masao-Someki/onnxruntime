@@ -41,6 +41,8 @@ DnnlOpManager::DnnlOpManager() {
   dnnl_ops_map_.emplace(std::make_pair("Mul", std::unique_ptr<DnnlNodeCapability>(new DnnlBinaryNodeCapability())));
   dnnl_ops_map_.emplace(std::make_pair("Pow", std::unique_ptr<DnnlNodeCapability>(new DnnlPowNodeCapability())));
   dnnl_ops_map_.emplace(std::make_pair("QAttention", std::unique_ptr<DnnlNodeCapability>(new DnnlQAttentionNodeCapability())));
+  dnnl_ops_map_.emplace(std::make_pair("QCrossAttention", std::unique_ptr<DnnlNodeCapability>(new DnnlQCrossAttentionNodeCapability())));
+  dnnl_ops_map_.emplace(std::make_pair("QRelPosAttention", std::unique_ptr<DnnlNodeCapability>(new DnnlQRelPosAttentionNodeCapability())));
   dnnl_ops_map_.emplace(std::make_pair("ReduceL1", std::unique_ptr<DnnlNodeCapability>(new DnnlReduceNodeCapability())));
   dnnl_ops_map_.emplace(std::make_pair("ReduceL2", std::unique_ptr<DnnlNodeCapability>(new DnnlReduceNodeCapability())));
   dnnl_ops_map_.emplace(std::make_pair("ReduceLogSum", std::unique_ptr<DnnlNodeCapability>(new DnnlReduceNodeCapability())));

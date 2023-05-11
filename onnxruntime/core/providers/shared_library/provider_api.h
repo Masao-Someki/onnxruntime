@@ -232,6 +232,7 @@ struct DeleteOnUnloadPtr {
 
 constexpr const char* kOnnxDomain = "";
 constexpr const char* kMSDomain = "com.microsoft";
+constexpr const char* kENDomain = "espnet_onnx";
 constexpr const char* kPytorchAtenDomain = "org.pytorch.aten";
 constexpr const char* kNGraphDomain = "com.intel.ai";
 constexpr const char* kCudaExecutionProvider = "CUDAExecutionProvider";

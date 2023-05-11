@@ -53,6 +53,25 @@ struct AttentionData {
   bool use_memory_efficient_attention;
 };
 
+bool LaunchCrossAttentionKernel(
+    const cudaDeviceProp& prop,                // Device Properties
+    cudaStream_t stream,                       // cuda stream
+    const void* query,                         // Input tensor
+    const void* key,                           // Input tensor
+    const int* mask_index,                     // Attention mask raw data or index (end position of each sequence, or end positions and start positions). NULL means no mask.
+    gsl::span<const int64_t> mask_index_dims,  // Mask index shape
+    void* output,                              // Output tensor
+    int batch_size,                            // Batch size (B)
+    int sequence_length,                       // Sequence length (S)
+    int kv_sequence_length,                    // Sequence length (S)
+    int num_heads,                             // Number of attention heads (N)
+    int head_size,                             // Hidden layer size per head (H)
+    void* qkv_buffer,                 // Temporary buffer
+    void* workspace_buffer,           // Temporary buffer
+    cublasHandle_t& cublas,                    // Cublas handle
+    const size_t element_size                  // Element size of input tensor
+);
+
 template <typename T>
 Status QkvToContext(
     const cudaDeviceProp& device_prop,
@@ -60,6 +79,7 @@ Status QkvToContext(
     cudaStream_t stream,
     contrib::AttentionParameters& parameters,
     AttentionData<T>& data);
+
 
 Status LaunchDecoderAttentionKernel(
     const cudaDeviceProp& prop,       // Device Properties
@@ -86,6 +106,27 @@ Status LaunchDecoderAttentionKernel(
     void* output,                     // Output tensor
     void* new_key_cache,              // New_key_cache tensor
     void* new_value_cache             // New_value_cache tensor
+);
+
+bool LaunchRelPosAttentionKernel(
+    const cudaDeviceProp& prop,
+    cudaStream_t stream,
+    const void* input,
+    const void* pos_emb,
+    const int* mask_index,
+    gsl::span<const int64_t> mask_index_dims,
+    void* output,
+    const void* pos_bias_u,
+    const void* pos_bias_v,
+    const int batch_size,
+    const int sequence_length,
+    const int pos_sequence_length,
+    const int num_heads,
+    const int head_size,
+    void* qkvp_buffer,
+    void* workspace_buffer,
+    cublasHandle_t& cublas,
+    const size_t element_size
 );
 
 // BxNxSxH => BxSxNxH or SxBxNxH (reversed_bs is true)

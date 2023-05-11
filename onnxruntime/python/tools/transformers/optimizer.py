@@ -29,6 +29,7 @@ from onnx_model_bart import BartOnnxModel
 from onnx_model_bert import BertOnnxModel
 from onnx_model_bert_keras import BertOnnxModelKeras
 from onnx_model_bert_tf import BertOnnxModelTF
+from onnx_model_espnet import ESPnetOnnxModel
 from onnx_model_gpt2 import Gpt2OnnxModel
 from onnx_model_tnlr import TnlrOnnxModel
 from onnx_model_unet import UnetOnnxModel
@@ -49,6 +50,7 @@ MODEL_TYPES = {
     ),  # might add a class for GPT2OnnxModel for TF later.
     "tnlr": (TnlrOnnxModel, "pytorch", 1),
     "unet": (UnetOnnxModel, "pytorch", 1),
+    "espnet": (ESPnetOnnxModel, "pytorch", 1),
 }
 
 

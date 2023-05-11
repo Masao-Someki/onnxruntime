@@ -9,7 +9,7 @@
 #include "core/graph/constants.h"
 #include "core/graph/contrib_ops/contrib_defs.h"
 #include "core/graph/contrib_ops/shape_inference_functions.h"
-#include "onnx/onnx-ml.pb.h" // ?
+#include "onnx/onnx-ml.pb.h"  // ?
 
 // Suppress a warning: global initializer calls a non-constexpr function 'symbol' which is from
 // ONNX_OPERATOR_SET_SCHEMA_EX macro and only happens in debug build
@@ -175,6 +175,244 @@ ONNX_MS_OPERATOR_SET_SCHEMA(
           auto& input_shape = getInputShape(ctx, 0);
           updateOutputShape(ctx, 0, input_shape);
         }));
+
+ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(QRelPosAttention, 1,
+                                     OpSchema()
+                                         .SetDoc("Quantization of Attention with relative positional embedding.")
+                                         .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                         .Attr("legacy",
+                                               "Whether to use Legacy version of relpos attention. Default value is 0.",
+                                               AttributeProto::INT,
+                                               static_cast<int64_t>(0))
+                                         .Input(
+                                             0, "input",
+                                             "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
+                                             "T1")
+                                         .Input(
+                                             1, "weights",
+                                             "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
+                                             "T2")
+                                         .Input(
+                                             2, "pos_emb",
+                                             "2D input tensor with shape (input_hidden_size, 3 * hidden_size), hidden_size = num_heads * head_size",
+                                             "T1")
+                                         .Input(
+                                             3, "pos_weights",
+                                             "1D input tensor with shape (3 * hidden_size)",
+                                             "T2")
+                                         .Input(
+                                             4, "bias",
+                                             "2D input tensor with shape (input_hidden_size, 3 * hidden_size), hidden_size = num_heads * head_size",
+                                             "T3")
+                                         .Input(
+                                             5, "pos_bias_u",
+                                             "1D input tensor with shape (3 * hidden_size)",
+                                             "T3")
+                                         .Input(
+                                             6, "pos_bias_v",
+                                             "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T3")
+                                         .Input(
+                                             7, "input_scale_tensor",
+                                             "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T3")
+                                         .Input(
+                                             8, "weights_scale_tensor",
+                                             "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T3")
+                                         .Input(
+                                             9, "pos_emb_scale_tensor",
+                                             "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T3")
+                                         .Input(
+                                             10, "pos_weights_scale_tensor",
+                                             "Attention mask index with shape (batch_size)",
+                                             "T3",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             11, "mask_index",
+                                             "Attention mask index with shape (batch_size)",
+                                             "T4",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             12, "input_zp_tensor",
+                                             "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T1",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             13, "iw_zp_tensor",
+                                             "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T2",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             14, "pos_zp_tensor",
+                                             "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T1",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             15, "pw_zp_tensor",
+                                             "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T2",
+                                             OpSchema::Optional)
+                                         .Output(
+                                             0,
+                                             "output",
+                                             "3D output tensor with shape (batch_size, sequence_length, hidden_size)",
+                                             "T3")
+                                         .TypeConstraint("T1", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
+                                         .TypeConstraint("T2", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
+                                         .TypeConstraint("T3", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float tensors.")
+                                         .TypeConstraint("T4", {"tensor(int32)"}, "Constrain mask index to integer types")
+                                         .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                           // Type inference
+                                           ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+
+                                           // Shape inference
+                                           if (hasInputShape(ctx, 0)) {
+                                             auto& input_shape = getInputShape(ctx, 0);
+                                             updateOutputShape(ctx, 0, input_shape);
+                                           }
+                                         }));
+
+ONNX_ESPNET_ONNX_OPERATOR_SET_SCHEMA(QCrossAttention, 1,
+                                     OpSchema()
+                                         .SetDoc("Quantization of Cross Attention.")
+                                         .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
+                                         .Input(
+                                             0, "query",
+                                             "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
+                                             "T1")
+                                         .Input(
+                                             1, "key",
+                                             "3D input tensor with shape (batch_size, sequence_length, input_hidden_size)",
+                                             "T1")
+                                         .Input(
+                                             2, "q_weight",
+                                             "2D input tensor with shape (input_hidden_size, 3 * hidden_size), hidden_size = num_heads * head_size",
+                                             "T2")
+                                         .Input(
+                                             3, "kv_weight",
+                                             "2D input tensor with shape (input_hidden_size, 3 * hidden_size), hidden_size = num_heads * head_size",
+                                             "T2")
+                                         .Input(
+                                             4, "q_bias",
+                                             "1D input tensor with shape (3 * hidden_size)",
+                                             "T3")
+                                         .Input(
+                                             5, "kv_bias",
+                                             "1D input tensor with shape (3 * hidden_size)",
+                                             "T3")
+                                         .Input(
+                                             6, "query_scale",
+                                             "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T3")
+                                         .Input(
+                                             7, "key_scale",
+                                             "scale of quantized input tensor. It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T3")
+                                         .Input(
+                                             8, "q_weight_scale",
+                                             "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T3")
+                                         .Input(
+                                             9, "kv_weight_scale",
+                                             "scale of weight scale. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T3")
+                                         .Input(
+                                             10, "mask_index",
+                                             "Attention mask index with shape (batch_size)",
+                                             "T4",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             11, "query_zero_point",
+                                             "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T1",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             12, "key_zero_point",
+                                             "zero point of quantized input tensor.It's a scalar, which means a per-tensor/layer quantization.",
+                                             "T1",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             13, "q_weight_zero_point",
+                                             "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T2",
+                                             OpSchema::Optional)
+                                         .Input(
+                                             14, "k_weight_zero_point",
+                                             "zero point of quantized weight tensor. It's a scalar or a 1D tensor, which means a per-tensor/per-column quantization."
+                                             "Its size should be 3 * hidden_size if it is per-column quantization",
+                                             "T2",
+                                             OpSchema::Optional)
+                                         .Output(
+                                             0,
+                                             "output",
+                                             "3D output tensor with shape (batch_size, sequence_length, hidden_size)",
+                                             "T3")
+                                         .TypeConstraint("T1", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
+                                         .TypeConstraint("T2", {"tensor(int8)", "tensor(uint8)"}, "Constrain input and output types to int8 tensors.")
+                                         .TypeConstraint("T3", {"tensor(float)", "tensor(float16)"}, "Constrain input and output types to float tensors.")
+                                         .TypeConstraint("T4", {"tensor(int32)"}, "Constrain mask index to integer types")
+                                         .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                           // Type inference
+                                           ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 2, 0);
+                                           if (ctx.getNumOutputs() > 1) {
+                                             ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 2, 1);
+                                           }
+
+                                           // Shape inference
+                                           if (hasInputShape(ctx, 0) && hasInputShape(ctx, 1) && hasInputShape(ctx, 4) && hasInputShape(ctx, 5)) {
+                                             auto& q_input_shape = getInputShape(ctx, 0);
+                                             auto& q_input_dims = q_input_shape.dim();
+                                             if (q_input_dims.size() != 3) {
+                                               fail_shape_inference("Inputs 0 shall be 3 dimensions");
+                                             }
+                                             auto& kv_input_shape = getInputShape(ctx, 1);
+                                             auto& kv_input_dims = kv_input_shape.dim();
+                                             if (kv_input_dims.size() != 3) {
+                                               fail_shape_inference("Inputs 1 shall be 3 dimensions");
+                                             }
+
+                                             auto& q_bias_shape = getInputShape(ctx, 4);
+                                             auto& q_bias_dims = q_bias_shape.dim();
+                                             if (q_bias_dims.size() != 1) {
+                                               fail_shape_inference("Invalid bias shape");
+                                             }
+                                             auto& kv_bias_shape = getInputShape(ctx, 5);
+                                             auto& kv_bias_dims = kv_bias_shape.dim();
+                                             if (kv_bias_dims.size() != 1) {
+                                               fail_shape_inference("Invalid bias shape");
+                                             }
+
+                                             std::vector<int64_t> qkv_hidden_sizes;
+                                             getRepeatedAttribute(ctx, "qkv_hidden_sizes", qkv_hidden_sizes);
+
+                                             int64_t output_hidden_size;
+                                             if (qkv_hidden_sizes.size() != 0) {
+                                               if (qkv_hidden_sizes.size() != 3) {
+                                                 fail_shape_inference("qkv_hidden_sizes should have 3 elements")
+                                               }
+                                               output_hidden_size = qkv_hidden_sizes[2];
+                                             } else {
+                                               output_hidden_size = q_bias_shape.dim(0).dim_value();
+                                             }
+
+                                             ONNX_NAMESPACE::TensorShapeProto output_shape;
+                                             for (auto& dim : q_input_dims) {
+                                               *output_shape.add_dim() = dim;
+                                             }
+
+                                             output_shape.mutable_dim(2)->set_dim_value(output_hidden_size);
+                                             updateOutputShape(ctx, 0, output_shape);
+                                           }
+                                         }));
 
 static const char* DequantizeLinear_ver1_doc = R"DOC(
 The linear dequantization operator. It consumes a quantized data, a scale, a zero point and computes the full precision data.
@@ -818,46 +1056,22 @@ ONNX_MS_OPERATOR_SET_SCHEMA(
             }
           }
 
-        if (all_lengths_known) {
-          output_shape->mutable_dim(axis)->set_dim_value(total_length);
-        }
-      }));
+          if (all_lengths_known) {
+            output_shape->mutable_dim(axis)->set_dim_value(total_length);
+          }
+        }));
 
-  ONNX_MS_OPERATOR_SET_SCHEMA(QLinearWhere, 1, OpSchema()
-    .SetDoc("Return elements, either from X or Y, depending on condition.")
-      .Input(0, "condition", " When True (nonzero), yield x, otherwise yield y", "B")
-      .Input(1, "X", "Y's zero point.", "T")
-      .Input(2, "x_scale", "X's scale.", "TF")
-      .Input(3, "x_zero_point", "X's zero point.", "T")
-      .Input(4, "Y", "Y's zero point.", "T")
-      .Input(5, "y_scale", "Y's scale.", "TF")
-      .Input(6, "y_zero_point", "Y's zero point.", "T")
-      .Input(7, "z_scale", "Z's scale.", "TF")
-      .Input(8, "z_zero_point", "Z's zero point.", "T")
-      .Output(0, "Z", "Tensor of shape equal to the broadcasted shape of condition, X, and Y", "T")
-      .TypeConstraint(
-        "B",
-        {"tensor(bool)"},
-        "Constrain input and output types to 8 bit signed and unsigned tensors.")
-      .TypeConstraint(
-        "TF",
-        {"tensor(float)"},
-        "Constrain scale types to any float tensor type.")
-      .TypeConstraint(
-        "T",
-        {"tensor(uint8)", "tensor(int8)"},
-        "Constrain input and output types to 8 bit signed and unsigned tensors.")
-      .TypeAndShapeInferenceFunction([](InferenceContext& ctx) {
-        propagateElemTypeFromInputToOutput(ctx, 1, 0);
-        if (hasNInputShapes(ctx, 9)) {
-          std::vector<const onnx::TensorShapeProto*> shapes;
-          shapes.push_back(&ctx.getInputType(0)->tensor_type().shape());
-          shapes.push_back(&ctx.getInputType(1)->tensor_type().shape());
-          shapes.push_back(&ctx.getInputType(4)->tensor_type().shape());
-          multidirectionalBroadcastShapeInference(
-              shapes, *ctx.getOutputType(0)->mutable_tensor_type()->mutable_shape());
-        }
-      }));
+ONNX_MS_OPERATOR_SET_SCHEMA(QLinearWhere, 1, OpSchema().SetDoc("Return elements, either from X or Y, depending on condition.").Input(0, "condition", " When True (nonzero), yield x, otherwise yield y", "B").Input(1, "X", "Y's zero point.", "T").Input(2, "x_scale", "X's scale.", "TF").Input(3, "x_zero_point", "X's zero point.", "T").Input(4, "Y", "Y's zero point.", "T").Input(5, "y_scale", "Y's scale.", "TF").Input(6, "y_zero_point", "Y's zero point.", "T").Input(7, "z_scale", "Z's scale.", "TF").Input(8, "z_zero_point", "Z's zero point.", "T").Output(0, "Z", "Tensor of shape equal to the broadcasted shape of condition, X, and Y", "T").TypeConstraint("B", {"tensor(bool)"}, "Constrain input and output types to 8 bit signed and unsigned tensors.").TypeConstraint("TF", {"tensor(float)"}, "Constrain scale types to any float tensor type.").TypeConstraint("T", {"tensor(uint8)", "tensor(int8)"}, "Constrain input and output types to 8 bit signed and unsigned tensors.").TypeAndShapeInferenceFunction([](InferenceContext& ctx) {
+  propagateElemTypeFromInputToOutput(ctx, 1, 0);
+  if (hasNInputShapes(ctx, 9)) {
+    std::vector<const onnx::TensorShapeProto*> shapes;
+    shapes.push_back(&ctx.getInputType(0)->tensor_type().shape());
+    shapes.push_back(&ctx.getInputType(1)->tensor_type().shape());
+    shapes.push_back(&ctx.getInputType(4)->tensor_type().shape());
+    multidirectionalBroadcastShapeInference(
+        shapes, *ctx.getOutputType(0)->mutable_tensor_type()->mutable_shape());
+  }
+}));
 
 ONNX_MS_OPERATOR_SET_SCHEMA(
     QGemm, 1,
@@ -949,7 +1163,8 @@ ONNX_MS_OPERATOR_SET_SCHEMA(
         .Attr("num_heads", "Number of attention heads", AttributeProto::INT)
         .Attr("unidirectional", "Whether every token can only attend to previous tokens. Default value is 0.",
               AttributeProto::INT, static_cast<int64_t>(0))
-        .Attr("past_present_share_buffer", "Corresponding past and present are same tensor, its shape is "
+        .Attr("past_present_share_buffer",
+              "Corresponding past and present are same tensor, its shape is "
               "(2, batch_size, num_heads, max_sequence_length, head_size)",
               AttributeProto::INT, OPTIONAL_VALUE)
         .Attr("mask_filter_value",
