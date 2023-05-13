@@ -32,6 +32,7 @@ class AttentionMask:
         self.mask_casted = {}
         self.utils = FusionUtils(model)
         self.mask_format = AttentionMaskFormat.MaskIndexEnd
+        self.opset_version = model.get_opset_version()
 
     def set_mask_format(self, mask_format: AttentionMaskFormat):
         self.mask_format = mask_format
@@ -69,13 +70,34 @@ class AttentionMask:
 
         # Add a mask processing node to convert attention mask to mask index (1D)
         output_name = self.model.create_node_name("mask_index")
-        mask_index_node = helper.make_node(
-            "ReduceSum",
-            inputs=[input_name],
-            outputs=[output_name],
-            name=self.model.create_node_name("ReduceSum", "MaskReduceSum"),
-        )
-        mask_index_node.attribute.extend([helper.make_attribute("axes", [1]), helper.make_attribute("keepdims", 0)])
+        if self.opset_version < 13:
+            mask_index_node = helper.make_node(
+                "ReduceSum",
+                inputs=[input_name],
+                outputs=[output_name],
+                name=self.model.create_node_name("ReduceSum", "MaskReduceSum"),
+            )
+            mask_index_node.attribute.extend([helper.make_attribute("axes", [1]), helper.make_attribute("keepdims", 0)])
+        else:
+            # ReduceSum-13: axes is moved from attribute to input
+            axes_name = "ort_const_1_reduce_sum_axes"
+            if self.model.get_initializer(axes_name) is None:
+                self.model.add_initializer(
+                    helper.make_tensor(
+                        name=axes_name,
+                        data_type=TensorProto.INT64,
+                        dims=[1],
+                        vals=[1],
+                    )
+                )
+            mask_index_node = helper.make_node(
+                "ReduceSum",
+                inputs=[input_name, axes_name],
+                outputs=[output_name],
+                name=self.model.create_node_name("ReduceSum", "MaskReduceSum"),
+            )
+            mask_index_node.attribute.extend([helper.make_attribute("keepdims", 0)])
+
         self.model.add_node(mask_index_node)
 
         self.mask_indice[input] = output_name
@@ -457,6 +479,13 @@ class FusionAttention(Fusion):
             for child in children:
                 if child.op_type == "LayerNormalization":
                     root_input = child.output[0]
+        elif normalize_node.op_type == "SkipLayerNormalization":
+            # match espnet attention
+            root_node = self.model.match_parent(start_node, "SkipLayerNormalization", 0)
+            if root_node is None:
+                # Then maybe CrossAttention.
+                return
+            root_input = root_node.output[0]
 
         children = input_name_to_nodes[root_input]
         children_types = [child.op_type for child in children]

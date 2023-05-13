@@ -12,14 +12,14 @@ from sys import path
 from typing import Tuple, Union
 
 import numpy as np
+from fusion_attention import AttentionMask
 from onnx import NodeProto, TensorProto, helper, numpy_helper
+
 from onnxruntime.transformers.fusion_base import Fusion
 from onnxruntime.transformers.fusion_options import AttentionMaskFormat
 from onnxruntime.transformers.fusion_utils import FusionUtils, NumpyHelper
 from onnxruntime.transformers.onnx_model import OnnxModel
 from onnxruntime.transformers.shape_infer_helper import SymbolicShapeInferenceHelper, get_shape_from_type_proto
-from fusion_attention import AttentionMask
-
 
 logger = getLogger(__name__)
 
@@ -272,7 +272,7 @@ class FusionCrossAttention(Fusion):
         qkv_nodes = self.model.match_parent_path(
             start_node,
             ["Add", "MatMul", "Reshape", "Transpose", "MatMul"],
-            [0, None, 0, 0, 0],
+            [1, None, 0, 0, 0],
         )
         if qkv_nodes is not None:
             (_, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
@@ -282,44 +282,39 @@ class FusionCrossAttention(Fusion):
         # find the root input
         residual_nodes = None
         residual_nodes = self.model.match_parent_path(
-            start_node,
-            ["Add", "Add", "MatMul", "Reshape"],
-            [1, 0, None, 0],
-        )
-        if residual_nodes is not None:
-            (input_to_ln, _, _, _) = residual_nodes
-
-        if residual_nodes is None:
-            residual_nodes = self.model.match_parent_path(
                 start_node,
                 ["Slice", "Concat", "Add"],
                 [1, None, 1],
             )
-            if residual_nodes is not None:
-                (_, input_to_ln, _) = residual_nodes
+        if residual_nodes is not None:
+            input_to_ln = residual_nodes[1].input[0]
 
         if residual_nodes is None:
             residual_nodes = self.model.match_parent_path(
                 start_node,
-                ["Slice", "Add", "Slice"],
-                [1, None, 1],
+                ["Add", "MatMul", "Reshape", "Transpose", "MatMul", "Transpose",
+                "Reshape", "Add", "MatMul", "LayerNormalization"],
+                [1, 1, 0, 0, 0, 1, 0, 0, 1, 0],
             )
             if residual_nodes is not None:
-                (_, input_to_ln, _) = residual_nodes
-        
+                input_to_ln = residual_nodes[-1].input[0]
+
+        if residual_nodes is None:
+            residual_nodes = self.model.match_parent_path(
+                start_node,
+                ["SkipLayerNormalization", "Add"],
+                [0, 1],
+            )
+            if residual_nodes is not None:
+                input_to_ln = residual_nodes[1].output[0]
+
         if residual_nodes is None:
             return
 
         root_input = None
-        children = input_name_to_nodes[input_to_ln.output[0]]
+        children = input_name_to_nodes[input_to_ln]
         for c in children:
-            if c.op_type == "LayerNormalization":
-                root_input = c.output[0]
-                break
-
-        children = input_name_to_nodes[root_input]
-        for c in children:
-            if c.op_type == "Slice":
+            if c.op_type in ("LayerNormalization", "SkipLayerNormalization"):
                 root_input = c.output[0]
                 break
 
@@ -349,6 +344,9 @@ class FusionCrossAttention(Fusion):
         q_nodes = self.model.match_parent_path(matmul_qk, ["Transpose", "Reshape", "Add", "MatMul"], [0, 0, 0, None])
         if q_nodes is None:
             return
+        # If there is a slice node before q_nodes, then it is not supported.
+        if self.model.match_parent(q_nodes[-1], "Slice", 0) is not None:
+            return
 
         (_, reshape_q, add_q, matmul_q) = q_nodes
 
@@ -359,11 +357,12 @@ class FusionCrossAttention(Fusion):
 
         mask_index = None
         if attention_with_mask:
-            _, *mask_nodes, _ = self.model.match_parent_path(
+            mask_nodes = self.model.match_parent_path(
                 add_qk, ['Mul', 'Sub', 'Unsqueeze', 'Unsqueeze'],
                 [None, 0, 1, 0])
             if mask_nodes is None:
                 return
+            mask_nodes = mask_nodes[1:-1]
             mask_index = self.attention_mask.process_mask(mask_nodes[-1].input[0])
 
         # Note that Cast might be removed by OnnxRuntime so we match two patterns here.

@@ -3,7 +3,6 @@
 // Modifications by Masao Someki
 // Copyright (c) 2022 Masao Someki
 
-#include "cross_attention_cpu_base.h"
 #include "attention_helper.h"
 
 #include "core/framework/tensorprotoutils.h"
@@ -12,6 +11,7 @@
 #include "core/util/math_cpuonly.h"
 #include "core/common/safeint.h"
 #include "core/platform/threadpool.h"
+#include "contrib_ops/cpu/bert/cross_attention_cpu_base.h"
 
 using onnxruntime::concurrency::ThreadPool;
 

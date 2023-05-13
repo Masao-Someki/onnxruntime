@@ -63,14 +63,14 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
   output_shape[2] = static_cast<int64_t>(input_hidden_size);
   Tensor* output = context->Output(0, output_shape);
 
-  cublasHandle_t cublas = CublasHandle();
+  cublasHandle_t cublas = GetCublasHandle(context);
   constexpr size_t element_size = sizeof(T);
 
   // Use GEMM for fully connection.
   int m = batch_size * sequence_length;
   int n = input_hidden_size;
   int k = input_hidden_size;
-  auto q_gemm_buffer = GetScratchBuffer<T>(batch_size * sequence_length * input_hidden_size * element_size);
+  auto q_gemm_buffer = GetScratchBuffer<T>(batch_size * sequence_length * input_hidden_size * element_size, context->GetComputeStream());
 
   typedef typename ToCudaType<T>::MappedType CudaT;
   CudaT one = ToCudaType<T>::FromFloat(1.0f);
@@ -82,7 +82,7 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
   CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
       cublas, CUBLAS_OP_N, CUBLAS_OP_N, n, m, 1, &one,
       reinterpret_cast<const CudaT*>(q_bias->template Data<T>()), n,
-      GetConstOnes<CudaT>(m), 1,
+      GetConstOnes<CudaT>(m, Stream(context)), 1,
       &zero, reinterpret_cast<CudaT*>(q_gemm_buffer.get()), n, device_prop));
 
   // Gemm, note that CUDA assumes col-major, so result(N, M) = 1 * weights x input + 1 x B.
@@ -96,7 +96,7 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
   m = batch_size * kv_sequence_length;
   n = input_hidden_size;
   k = input_hidden_size;
-  auto kv_gemm_buffer = GetScratchBuffer<T>(batch_size * kv_sequence_length * 2 * input_hidden_size * element_size);
+  auto kv_gemm_buffer = GetScratchBuffer<T>(batch_size * kv_sequence_length * 2 * input_hidden_size * element_size, context->GetComputeStream());
 
   // compute query
   // Bias shape is (N), broadcast using B(N, M) = 1 * bias(N, 1) x ones(1, M) + 0 * B.
@@ -104,7 +104,7 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
   CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
       cublas, CUBLAS_OP_N, CUBLAS_OP_N, n, m, 1, &one,
       reinterpret_cast<const CudaT*>(kv_bias->template Data<T>()), n,
-      GetConstOnes<CudaT>(m), 1,
+      GetConstOnes<CudaT>(m, Stream(context)), 1,
       &zero, reinterpret_cast<CudaT*>(kv_gemm_buffer.get()), n, device_prop));
 
   // Gemm, note that CUDA assumes col-major, so result(N, M) = 1 * weights x input + 1 x B.
@@ -114,12 +114,12 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
       reinterpret_cast<const CudaT*>(key->template Data<T>()), k,
       &one, reinterpret_cast<CudaT*>(kv_gemm_buffer.get()), n, device_prop));
 
-  auto qkv_buffer_p = GetScratchBuffer<void>(batch_size * (sequence_length + 2 * kv_sequence_length) * input_hidden_size * element_size);
-  auto workspace_p = GetScratchBuffer<void>(2 * batch_size * sequence_length * num_heads_ * element_size * (2 * head_size + kv_sequence_length));
+  auto qkv_buffer_p = GetScratchBuffer<void>(batch_size * (sequence_length + 2 * kv_sequence_length) * input_hidden_size * element_size, context->GetComputeStream());
+  auto workspace_p = GetScratchBuffer<void>(2 * batch_size * sequence_length * num_heads_ * element_size * (2 * head_size + kv_sequence_length), context->GetComputeStream());
 
   if (!LaunchCrossAttentionKernel(
           device_prop,
-          Stream(),
+          Stream(context),
           reinterpret_cast<const CudaT*>(q_gemm_buffer.get()),
           reinterpret_cast<const CudaT*>(kv_gemm_buffer.get()),
           nullptr == mask_index ? nullptr : mask_index->template Data<int>(),
@@ -135,8 +135,7 @@ Status CrossAttention<T>::ComputeInternal(OpKernelContext* context) const {
           cublas,
           element_size)) {
     // Get last error to reset it to cudaSuccess.
-    CUDA_CALL(cudaGetLastError());
-    return Status(common::ONNXRUNTIME, common::FAIL);
+    return CUDA_CALL(cudaGetLastError());
   }
 
   return Status::OK();

@@ -54,7 +54,7 @@ Status RelativeShift<T>::ComputeInternal(OpKernelContext* context) const {
   // apply relative shift to input tensor
   typedef typename ToCudaType<T>::MappedType CudaT;
   if (!LaunchRelShiftAdd(
-    Stream(),
+    Stream(context),
     sequence_length,
     pos_sequence_length,
     batch_size,
@@ -62,8 +62,7 @@ Status RelativeShift<T>::ComputeInternal(OpKernelContext* context) const {
     reinterpret_cast<const CudaT*>(matrix_ac->template Data<T>()),
     reinterpret_cast<const CudaT*>(matrix_bd->template Data<T>()),
     output->template MutableData<T>())) {
-      CUDA_CALL(cudaGetLastError());
-      return Status(common::ONNXRUNTIME, common::FAIL);
+      return CUDA_CALL(cudaGetLastError());
     }
 
   return Status::OK();

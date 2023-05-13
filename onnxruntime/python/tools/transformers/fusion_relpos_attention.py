@@ -5,22 +5,22 @@
 # Modification by Masao Someki
 # Copyright (c) 2022 Masao Someki
 
+import sys
 from enum import Enum
 from logging import getLogger
 from os import name
 from sys import path
-import sys
 from typing import Tuple, Union
 
 import numpy as np
+from fusion_attention import AttentionMask
 from onnx import NodeProto, TensorProto, helper, numpy_helper
+
 from onnxruntime.transformers.fusion_base import Fusion
 from onnxruntime.transformers.fusion_options import AttentionMaskFormat
 from onnxruntime.transformers.fusion_utils import FusionUtils, NumpyHelper
 from onnxruntime.transformers.onnx_model import OnnxModel
 from onnxruntime.transformers.shape_infer_helper import SymbolicShapeInferenceHelper, get_shape_from_type_proto
-from fusion_attention import AttentionMask
-
 
 logger = getLogger(__name__)
 
@@ -37,7 +37,7 @@ class FusionRelPosAttention(Fusion):
         num_heads: int,
         attention_mask: AttentionMask,
     ):
-        super().__init__(model, "RelPosAttention", ["LayerNormalization"])
+        super().__init__(model, "RelPosAttention", ["LayerNormalization", "SkipLayerNormalization"])
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.attention_mask = attention_mask
@@ -282,6 +282,7 @@ class FusionRelPosAttention(Fusion):
         # Sometimes we can not fuse skiplayernormalization since the add before layernorm has an output that used by nodes outside skiplayernorm
         # Conceptually we treat add before layernorm as skiplayernorm node since they share the same pattern
         start_node = normalize_node
+        import sys
         if normalize_node.op_type == "LayerNormalization":
             add_before_layernorm = self.model.match_parent(normalize_node, "Add", 0)
             if add_before_layernorm is not None:
@@ -295,11 +296,21 @@ class FusionRelPosAttention(Fusion):
                 ["Mul", "Add", "MatMul", "Reshape", "Transpose", "MatMul"], # Conformer has ff_scale
                 [1, None, None, None, 0, 0],
             )
+
         if qkv_nodes is not None:
             (_, _, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
-        else:
-            return
 
+        if qkv_nodes is None:
+            qkv_nodes = self.model.match_parent_path(
+                    start_node,
+                    ["Add", "MatMul", "Reshape", "Transpose", "MatMul"], # Conformer has ff_scale
+                    [1, 1, 0, 0, 0],
+                )
+            if qkv_nodes is not None:
+                (_, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
+
+        if qkv_nodes is None:
+            return
 
         v_nodes = self.model.match_parent_path(matmul_qkv, ["Transpose", "Reshape", "Add", "MatMul"], [1, 0, 0, None])
         if v_nodes is None:
@@ -308,13 +319,17 @@ class FusionRelPosAttention(Fusion):
         (_, _, add_v, matmul_v) = v_nodes
 
         # root input
-        root_nodes = self.model.match_parent_path(matmul_v, ["LayerNormalization"], [None])
-        if root_nodes is None:
+        root_node = self.model.match_parent(matmul_v, "LayerNormalization", 0)
+        if root_node is None:
+            root_node = self.model.match_parent(matmul_v, "SkipLayerNormalization", 0)
+
+        if root_node is None:
             return
-        root_input = root_nodes[0].output[0]
+        root_input = root_node.output[0]
 
         qk_nodes = self.model.match_parent_path(matmul_qkv,
             ["Softmax","Add", "Div", "Add", "MatMul"], [0, 0, None, 0, 0])
+
         if qk_nodes is None:
             return
         (_, add_qk, _, add_bias_uv, matmul_qk) = qk_nodes
@@ -334,13 +349,20 @@ class FusionRelPosAttention(Fusion):
             return
         (_, _, add_k, matmul_k) = k_nodes
 
-        # find bias_v from 
+        # find bias_v from
         # latest version
         is_legacy = False
         pos_v_matmul_nodes = self.model.match_parent_path(
             add_bias_uv,
             ["Slice", "Unsqueeze", "Add", "Div", "Gather", "Shape", "MatMul"],
             [1, 2, 0, None, None, None, None])
+
+        # Latest relative shift for torch 2.0.1
+        if pos_v_matmul_nodes is None:
+            pos_v_matmul_nodes = self.model.match_parent_path(
+                add_bias_uv,
+                ["Slice", "Unsqueeze", "Add", "Div", "Squeeze", "Slice", "Shape", "MatMul"],
+                [1, 2, 0, 0, 0, 0, 0, 0])
 
         if pos_v_matmul_nodes is None:
             # check if model is legacy version
@@ -350,6 +372,24 @@ class FusionRelPosAttention(Fusion):
                 [1, 0, 0, 1])
             if pos_v_matmul_nodes is not None:
                 is_legacy = True
+
+        # torch 2.0.1
+        # It seems that torch.2.0.1 cannot export Slice -> Add properly,
+        # we need to trace the model from q_reshape.
+        if pos_v_matmul_nodes is None:
+            q_reshape = self.model.match_parent_path(
+                matmul_qk, ["Transpose", "Add", "Reshape"], [0, 0, 0])[-1]
+            qv_add = input_name_to_nodes[q_reshape.output[0]][0]
+            relshift_subgraph = self.model.get_children_subgraph_nodes(
+                qv_add, [add_bias_uv]
+            )
+            slice_node = [r for r in relshift_subgraph if r.op_type == "Slice"][0]
+            pos_v_matmul_nodes = self.model.match_parent_path(
+                slice_node,
+                ["Reshape", "Concat", "MatMul"],
+                [0, 0, 1])
+            pos_v_matmul_nodes = [slice_node] + pos_v_matmul_nodes
+            is_legacy = True
 
         if pos_v_matmul_nodes is None:
             return

@@ -13,11 +13,11 @@ from sys import path
 from typing import Tuple, Union
 
 import numpy as np
+from fusion_attention import AttentionMask
 from onnx import NodeProto, helper
+
 from onnxruntime.transformers.fusion_base import Fusion
 from onnxruntime.transformers.onnx_model import OnnxModel
-
-from fusion_attention import AttentionMask
 
 logger = getLogger(__name__)
 
@@ -31,7 +31,7 @@ class FusionRelativeShift(Fusion):
         self,
         model: OnnxModel,
     ):
-        super().__init__(model, "RelativeShift", ["LayerNormalization"])
+        super().__init__(model, "RelPosAttention", ["LayerNormalization", "SkipLayerNormalization"])
 
     def create_relshift_node(
         self,
@@ -77,9 +77,20 @@ class FusionRelativeShift(Fusion):
                 ["Mul", "Add", "MatMul", "Reshape", "Transpose", "MatMul"], # Conformer has ff_scale
                 [1, None, None, None, 0, 0],
             )
+
         if qkv_nodes is not None:
             (_, _, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
-        else:
+
+        if qkv_nodes is None:
+            qkv_nodes = self.model.match_parent_path(
+                    start_node,
+                    ["Add", "MatMul", "Reshape", "Transpose", "MatMul"], # Conformer has ff_scale
+                    [1, 1, 0, 0, 0],
+                )
+            if qkv_nodes is not None:
+                (_, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
+
+        if qkv_nodes is None:
             return
 
         v_nodes = self.model.match_parent_path(matmul_qkv, ["Transpose", "Reshape", "Add", "MatMul"], [1, 0, 0, None])
@@ -132,6 +143,13 @@ class FusionRelativeShift(Fusion):
                 ["Slice", "Unsqueeze", "Add", "Div", "Squeeze", "Slice", "Shape", "MatMul"],
                 [1, 2, 0, None, None, None, None, None])
 
+        # Latest relative shift for torch 2.0.1
+        if pos_v_matmul_nodes is None:
+            pos_v_matmul_nodes = self.model.match_parent_path(
+                add_bias_uv,
+                ["Slice", "Unsqueeze", "Add", "Div", "Squeeze", "Slice", "Shape", "MatMul"],
+                [1, 2, 0, 0, 0, 0, 0, 0])
+
         if pos_v_matmul_nodes is None:
             # check if model is legacy version
             pos_v_matmul_nodes = self.model.match_parent_path(
@@ -140,6 +158,24 @@ class FusionRelativeShift(Fusion):
                 [1, 0, 0, 1])
             if pos_v_matmul_nodes is not None:
                 is_legacy = True
+
+        # Legacy relative shift for torch 2.0.1
+        # It seems that torch.2.0.1 cannot export Slice -> Add properly,
+        # we need to trace the model from q_reshape.
+        if pos_v_matmul_nodes is None:
+            q_reshape = self.model.match_parent_path(
+                matmul_qk, ["Transpose", "Add", "Reshape"], [0, 0, 0])[-1]
+            qv_add = input_name_to_nodes[q_reshape.output[0]][0]
+            relshift_subgraph = self.model.get_children_subgraph_nodes(
+                qv_add, [add_bias_uv]
+            )
+            slice_node = [r for r in relshift_subgraph if r.op_type == "Slice"][0]
+            pos_v_matmul_nodes = self.model.match_parent_path(
+                slice_node,
+                ["Reshape", "Concat", "MatMul"],
+                [0, 0, 1])
+            pos_v_matmul_nodes = [slice_node] + pos_v_matmul_nodes
+            is_legacy = True
 
         if pos_v_matmul_nodes is None:
             return

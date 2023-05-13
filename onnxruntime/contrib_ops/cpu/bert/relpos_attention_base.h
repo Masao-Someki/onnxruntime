@@ -13,14 +13,14 @@ namespace contrib {
 
 class RelPosAttentionBase {
  public:
-  Status CheckInputs(const TensorShape& input_shape,
-                     const TensorShape& weights_shape,
-                     const TensorShape& bias_shape,
-                     const TensorShape& pos_emb_shape,
-                     const TensorShape& pos_bias_u_shape,
-                     const TensorShape& pos_bias_v_shape,
-                     const Tensor*& mask_index,
-                     const int max_threads_per_block) const;
+  // Status CheckInputs(const TensorShape& input_shape,
+  //                    const TensorShape& weights_shape,
+  //                    const TensorShape& bias_shape,
+  //                    const TensorShape& pos_emb_shape,
+  //                    const TensorShape& pos_bias_u_shape,
+  //                    const TensorShape& pos_bias_v_shape,
+  //                    const Tensor*& mask_index,
+  //                    const int max_threads_per_block) const;
 
  protected:
   RelPosAttentionBase(const OpKernelInfo& info) {
@@ -35,13 +35,13 @@ class RelPosAttentionBase {
     }
   }
 
-  // Status CheckInputs(const TensorShape& input_shape,
-  //                    const TensorShape& weights_shape,
-  //                    const TensorShape& bias_shape,
-  //                    const TensorShape& pos_emb_shape,
-  //                    const TensorShape& pos_bias_u_shape,
-  //                    const TensorShape& pos_bias_v_shape,
-  //                    const Tensor*& mask_index) const;
+  Status CheckInputs(const TensorShape& input_shape,
+                     const TensorShape& weights_shape,
+                     const TensorShape& bias_shape,
+                     const TensorShape& pos_emb_shape,
+                     const TensorShape& pos_bias_u_shape,
+                     const TensorShape& pos_bias_v_shape,
+                     const Tensor*& mask_index) const;
 
   int num_heads_;
   bool is_legacy_;

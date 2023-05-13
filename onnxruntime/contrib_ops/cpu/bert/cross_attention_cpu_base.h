@@ -94,7 +94,7 @@ class CrossAttentionCPUBase : public CrossAttentionBase {
     {
       if (mask_data != nullptr) {
         // unidirectional is always false
-        PrepareMask(mask_index, mask_index_dims, mask_data, false, batch_size, sequence_length, kv_sequence_length - sequence_length);
+        PrepareMask(mask_index, mask_index_dims, mask_data, false, batch_size, sequence_length, kv_sequence_length - sequence_length, -10000.0f);
       } else {  // no any mask
         memset(attention_probs, 0, static_cast<size_t>(batch_size) * num_heads_ * sequence_length * kv_sequence_length * sizeof(T));
       }
