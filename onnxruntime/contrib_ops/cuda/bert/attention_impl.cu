@@ -123,7 +123,7 @@ size_t GetCrossAttentionWorkspaceSize(
     int head_size,
     int sequence_length,
     int kv_sequence_length) {
-  size_t qkv_size = batch_size * (sequence_length + 2 * kv_sequence_length )* num_heads * head_size * element_size;
+  size_t qkv_size = batch_size * (sequence_length + 2 * kv_sequence_length) * num_heads * head_size * element_size;
   return qkv_size + 2 * GetAttentionScratchSize(element_size, batch_size, num_heads, sequence_length, kv_sequence_length);
 }
 
@@ -713,11 +713,12 @@ Status QkvToContext(
   DUMP_TENSOR("unfused output", data.output, batch_size * sequence_length, num_heads, v_head_size);
   return result;
 }
+
 template <typename T>
-bool CrossQkvToContext(
+Status CrossQkvToContext(
     const cudaDeviceProp& prop, cublasHandle_t& cublas, cudaStream_t stream,
     const int batch_size, const int sequence_length, const int kv_sequence_length, const int num_heads, const int head_size, const size_t element_size,
-    const T* query, const T* key, T* output, T* qkv_buffer,// T* workspace_buffer,
+    const T* query, const T* key, T* output, T* qkv_buffer,  // T* workspace_buffer,
     const int* mask_index, gsl::span<const int64_t> mask_index_dims, bool use_persistent_softmax) {
   const int max_threads_per_block = prop.maxThreadsPerBlock;
   const int BN = batch_size * num_heads;
@@ -726,7 +727,7 @@ bool CrossQkvToContext(
   const int k_buffer_offset = sequence_length * BHN;
   const int v_buffer_offset = (sequence_length + kv_sequence_length) * BHN;
 
-    // T* temp_qkv_buffer = workspace_buffer;
+  // T* temp_qkv_buffer = workspace_buffer;
   const size_t bytes = GetAttentionScratchSize(element_size, batch_size, num_heads, sequence_length, kv_sequence_length);
   T* scratch1 = qkv_buffer;
   T* scratch2 = scratch1 + (bytes / element_size);
@@ -734,16 +735,14 @@ bool CrossQkvToContext(
 
   T* q = scratch3;
   // transpose q and copy them to qkv_buffer
-  if (!LaunchTransQkv(stream, 1, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, query, scratch3)) {
-    return false;
-  }
+  ORT_RETURN_IF_ERROR(
+    LaunchTransQkv(stream, 1, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, query, scratch3));
 
   // const T* v = qkv_buffer + v_buffer_offset;
   // transpose kv and copy them to qkv_buffer
   T* kv_buffer = scratch3 + k_buffer_offset;
-  if (!LaunchTransQkv(stream, 2, kv_sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, key, kv_buffer)) {
-    return false;
-  }
+  ORT_RETURN_IF_ERROR(
+      LaunchTransQkv(stream, 2, kv_sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, key, kv_buffer));
 
   // scratch1: BxNxSxS* buffer
   // scratch2: BxNxSxS* buffer
@@ -760,12 +759,12 @@ bool CrossQkvToContext(
   float zero = 0.f;
 
   float alpha = rsqrt_head_size;
-    // typedef typename ToCudaType<T>::MappedType CudaT;
+  // typedef typename ToCudaType<T>::MappedType CudaT;
   // CudaT one = ToCudaType<T>::FromFloat(1.0f);
   // CudaT alpha = ToCudaType<T>::FromFloat(rsqrt_head_size);
   const int strideA = kv_sequence_length * head_size;
   const int strideB = sequence_length * head_size;
-  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+  ORT_RETURN_IF_ERROR(CUBLAS_CALL(cublasGemmStridedBatchedHelper(
           cublas, CUBLAS_OP_T, CUBLAS_OP_N,
           kv_sequence_length, sequence_length, head_size,
           &alpha,
@@ -773,28 +772,22 @@ bool CrossQkvToContext(
           q, head_size, strideB,
           &zero,
           scratch1, kv_sequence_length, temp_matrix_size,
-          BN, prop))) {
-    return false;
-  }
+          BN, prop)));
 
   // apply softmax and store result P to scratch2: BxNxSxS*
-  if (!ComputeSoftmax<T>(stream, kv_sequence_length, sequence_length, batch_size, num_heads, nullptr, scratch1, scratch2, false)) {
-    return false;
-  }
+  ORT_RETURN_IF_ERROR(ComputeSoftmax<T>(stream, kv_sequence_length, sequence_length, batch_size, num_heads, nullptr, scratch1, scratch2, false));
 
   // compute P*V (as V*P), and store in scratch3: BxNxSxH
   T* v = scratch3 + v_buffer_offset;
-  if (!CUBLAS_CALL(cublasGemmStridedBatchedHelper(
+  ORT_RETURN_IF_ERROR(CUBLAS_CALL(cublasGemmStridedBatchedHelper(
           cublas, CUBLAS_OP_N, CUBLAS_OP_N, head_size, sequence_length, kv_sequence_length, &one, v, head_size, strideA,
-          scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop))) {
-    return false;
-  }
+          scratch2, kv_sequence_length, temp_matrix_size, &zero, scratch3, head_size, strideB, BN, prop)));
 
   // scratch3 is BxNxSxH, transpose to output BxSxNxH
   return LaunchTransCtx(stream, sequence_length, batch_size, head_size, num_heads, max_threads_per_block, true, scratch3, output);
 }
 
-bool LaunchCrossAttentionKernel(
+Status LaunchCrossAttentionKernel(
     const cudaDeviceProp& prop,
     cudaStream_t stream,
     const void* query,
@@ -819,20 +812,20 @@ bool LaunchCrossAttentionKernel(
     return CrossQkvToContext(prop, cublas, stream,
                              batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
                              reinterpret_cast<const half*>(query), reinterpret_cast<const half*>(key), reinterpret_cast<half*>(output),
-                             reinterpret_cast<half*>(qkv_buffer),// reinterpret_cast<half*>(workspace_buffer),
+                             reinterpret_cast<half*>(qkv_buffer),  // reinterpret_cast<half*>(workspace_buffer),
                              mask_index, mask_index_dims, use_persistent_softmax);
   } else {
     return CrossQkvToContext(prop, cublas, stream,
                              batch_size, sequence_length, kv_sequence_length, num_heads, head_size, element_size,
                              reinterpret_cast<const float*>(query), reinterpret_cast<const float*>(key), reinterpret_cast<float*>(output),
-                             reinterpret_cast<float*>(qkv_buffer),// reinterpret_cast<float*>(workspace_buffer),
+                             reinterpret_cast<float*>(qkv_buffer),  // reinterpret_cast<float*>(workspace_buffer),
                              mask_index, mask_index_dims, use_persistent_softmax);
   }
 }
 
 template <typename T>
 Status DecoderQkvToContext(
-    const cudaDeviceProp& prop,
+    const cudaDeviceProp& device_prop,
     cudaStream_t stream,
     cublasHandle_t& cublas,
     const size_t element_size,
@@ -845,6 +838,7 @@ Status DecoderQkvToContext(
     const bool use_past,
     const bool has_layer_state,
     const bool has_key_padding_mask,
+    const float mask_filter_value,
     const T* gemm_query_buffer,
     const T* gemm_kv_buffer,
     const bool* key_padding_mask,
@@ -1017,7 +1011,7 @@ Status LaunchDecoderAttentionKernel(
     void* new_value_cache) {
   if (element_size == 2) {
     return DecoderQkvToContext(
-        prop,
+        device_prop,
         stream,
         cublas,
         element_size,
@@ -1030,6 +1024,7 @@ Status LaunchDecoderAttentionKernel(
         use_past,
         has_layer_state,
         has_key_padding_mask,
+        mask_filter_value,
         reinterpret_cast<const half*>(gemm_query_buffer),
         reinterpret_cast<const half*>(gemm_kv_buffer),
         key_padding_mask,
@@ -1042,7 +1037,7 @@ Status LaunchDecoderAttentionKernel(
         reinterpret_cast<half*>(new_value_cache));
   } else {
     return DecoderQkvToContext(
-        prop,
+        device_prop,
         stream,
         cublas,
         element_size,
@@ -1055,6 +1050,7 @@ Status LaunchDecoderAttentionKernel(
         use_past,
         has_layer_state,
         has_key_padding_mask,
+        mask_filter_value,
         reinterpret_cast<const float*>(gemm_query_buffer),
         reinterpret_cast<const float*>(gemm_kv_buffer),
         key_padding_mask,

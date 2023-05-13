@@ -104,6 +104,7 @@ void RunQCrossAttention(const std::vector<float>& query,
         kv_weights_dims,
         QuantizeLinearTestVector<QWeight>(kv_weights_data, k_weight_quant_params, force_symmetric));
   }
+
   if (use_float16) {
     tester.AddInput<MLFloat16>("q_bias", q_bias_dims, ToFloat16(q_bias_data));
     tester.AddInput<MLFloat16>("kv_bias", kv_bias_dims, ToFloat16(kv_bias_data));
@@ -254,6 +255,7 @@ static void RunQCrossAttentionU8U8(
   quantization::Params<uint8_t> key_quant_params = {0.0f, 0};
   quantization::Params<uint8_t> q_weights_quant_params = {0.0f, 0};
   quantization::Params<uint8_t> k_weights_quant_params = {0.0f, 0};
+
   if (use_special_quantize_parameter) {
     query_quant_params.scale = 0.1f;
     key_quant_params.scale = 0.1f;
@@ -292,11 +294,8 @@ static void RunQCrossAttentionU8S8(
   quantization::Params<int8_t> k_weights_quant_params(/*scale=*/0.0f, /*zero_point=*/0);
   if (use_special_quantize_parameter) {
     query_quant_params.scale = 0.1f;
-    weights_quant_params.scale = 0.1f;
     key_quant_params.scale = 0.1f;
-    input_quant_params.zero_point = 128;
     q_weights_quant_params.scale = 0.1f;
-    weights_quant_params.zero_point = 1;
     k_weights_quant_params.scale = 0.1f;
     query_quant_params.zero_point = 128;
     key_quant_params.zero_point = 128;
