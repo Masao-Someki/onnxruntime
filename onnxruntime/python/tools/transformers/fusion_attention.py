@@ -426,7 +426,7 @@ class FusionAttention(Fusion):
         qkv_nodes = self.model.match_parent_path(
             start_node,
             ["Add", "MatMul", "Reshape", "Transpose", "MatMul"],
-            [None, None, 0, 0, 0],
+            [1, None, 0, 0, 0],
         )
         einsum_node = None
         if qkv_nodes is not None:
