@@ -272,7 +272,7 @@ class FusionCrossAttention(Fusion):
         qkv_nodes = self.model.match_parent_path(
             start_node,
             ["Add", "MatMul", "Reshape", "Transpose", "MatMul"],
-            [0, None, 0, 0, 0],
+            [1, None, 0, 0, 0],
         )
         if qkv_nodes is not None:
             (_, matmul_qkv, reshape_qkv, transpose_qkv, matmul_qkv) = qkv_nodes
@@ -284,7 +284,7 @@ class FusionCrossAttention(Fusion):
         residual_nodes = self.model.match_parent_path(
             start_node,
             ["Add", "Add", "MatMul", "Reshape"],
-            [1, 0, None, 0],
+            [0, 1, None, 0],
         )
         if residual_nodes is not None:
             (input_to_ln, _, _, _) = residual_nodes
